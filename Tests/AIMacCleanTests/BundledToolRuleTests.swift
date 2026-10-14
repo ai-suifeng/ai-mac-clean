@@ -89,12 +89,23 @@ final class BundledToolRuleTests: XCTestCase {
         XCTAssertEqual(report.usableRules.map(\.id), rules.map(\.id))
     }
 
-    func test内置规则准入零警告() throws {
-        let (_, report) = try loadBundledRules()
+    /// 内置规则里凡是撞上内置受保护清单的路径，必须**声明为受保护**。
+    /// 标成缓存与日志或不确定同样会被准入拒绝（spec #7 §规则集准入），
+    /// 因此出厂规则与内置清单必须逐条对齐，而不是靠界面去解释两者不一致。
+    func test内置规则与内置受保护清单逐条对齐() throws {
+        let directory = try bundledRuleDirectory()
+        let load = RuleLoader.loadRules(inDirectory: directory)
+        let home = try makeHome()
 
-        // 警告 = 「声明的类别与内置受保护清单不一致」。内置规则应当直接与内置保护对齐，
-        // 而不是标一个更弱的类别让界面去解释「它其实仍受保护」。
-        XCTAssertEqual(report.warnings.map(\.description), [])
+        for rule in load.rules {
+            for finding in ProtectionMonotonicity.findings(in: rule, homeDirectory: home) {
+                XCTFail(
+                    "内置规则 \(rule.id) 的 \(finding.field) 把 \(finding.entry.pattern.canonicalString) "
+                        + "判为 \(finding.entry.category.rawValue)，但它落在内置受保护条目 "
+                        + "\(finding.region.ruleIdentifier) 内，应当声明为 protected。"
+                )
+            }
+        }
     }
 
     func test受保护声明与内置保护清单一致() throws {
@@ -245,7 +256,7 @@ final class BundledToolRuleTests: XCTestCase {
             isDirectory: nil
         ), "这棵树刻意不创建工具根，用来证明缺失路径被静默跳过。")
         XCTAssertNil(RuleSetAdmission.rejection(forRule: claude, homeDirectory: emptyHome))
-        XCTAssertEqual(RuleSetAdmission.warnings(forRule: claude, homeDirectory: emptyHome), [])
+        XCTAssertTrue(ProtectionMonotonicity.findings(in: claude, homeDirectory: emptyHome).isEmpty)
 
         // 新版（无关联数据目录）与旧版（有）的声明集合一致，不需要两套规则。
         let declared = claude.cascade.map(\.pattern.canonicalString)

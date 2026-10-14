@@ -61,7 +61,7 @@ final class GlossarySynonymGuardTests: XCTestCase {
     func test拒绝原因与准入诊断不含GLOSSARY的禁用同义词() throws {
         let home = NSTemporaryDirectory()
 
-        let monotonicity = ProtectionDowngrade(
+        let monotonicity = ProtectionMonotonicityViolation(
             field: "classification[0].category",
             pattern: "auth.json",
             declaredCategory: .archivableSession,

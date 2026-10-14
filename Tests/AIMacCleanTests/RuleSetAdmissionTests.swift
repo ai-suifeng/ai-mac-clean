@@ -198,19 +198,51 @@ final class RuleSetAdmissionTests: XCTestCase {
 
     // MARK: 保护单调性（核心断言，直接打 Seam 2）
 
-    func test把受保护路径标成缓存不构成降级但要给出提示() throws {
+    /// spec #7 §规则集准入：「任何用户规则试图把某路径从「受保护」降级为「可归档」，
+    /// **或从「可归档」升级为「受保护」以外的其它类别**，准入必须**拒绝该规则**」。
+    ///
+    /// 标成缓存不是「无害的错标」：它让界面显示一个「可以随手清掉」的标签，
+    /// 而内置清单说这条路径受保护。用户规则只能把它抬高成受保护，不能改判。
+    func test把内置受保护路径改判为缓存同样被拒绝() throws {
         let home = try makeHome()
-        let claude = try decode(RuleFixtures.claudeCodeJSON)
+        let rule = try decode(RuleAdmissionFixtures.claudeShellSnapshotsCacheJSON)
 
-        let report = RuleSetAdmission.admit(rules: [claude], homeDirectory: home)
+        let rejection = RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)
 
-        // 缓存与日志同样「只展示、不动」，不授予删除权限，因此不构成降级（PRD §5.1）。
-        XCTAssertEqual(report.usableRules.map(\.id), ["claude-code"])
-        let warning = report.warnings.first { $0.pattern == "shell-snapshots/**" }
-        XCTAssertEqual(warning?.protectedRuleIdentifier, "claude-code/shell-snapshots")
-        XCTAssertEqual(warning?.declaredCategory, .cacheAndLog)
+        XCTAssertEqual(rejection?.ruleIdentifier, "claude-code-2")
+        XCTAssertEqual(rejection?.reason.protectedRuleIdentifier, "claude-code/shell-snapshots")
+        XCTAssertEqual(rejection?.reason.protectionDeclaredCategory, .cacheAndLog)
+
+        let message = rejection?.description ?? ""
+        XCTAssertTrue(message.contains("classification[1].category"), message)
+        XCTAssertTrue(message.contains("shell-snapshots/**"), message)
+        XCTAssertTrue(message.contains("只能声明为受保护"), message)
     }
 
+    func test把内置受保护路径改判为不确定同样被拒绝() throws {
+        let home = try makeHome()
+        let rule = try decode(RuleAdmissionFixtures.claudeSettingsUncertainJSON)
+
+        let rejection = RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)
+
+        XCTAssertEqual(rejection?.reason.protectedRuleIdentifier, "claude-code/settings")
+        XCTAssertEqual(rejection?.reason.protectionDeclaredCategory, .uncertain)
+        XCTAssertTrue(rejection?.description.contains("settings*.json") ?? false, rejection?.description ?? "")
+    }
+
+    /// 内置受保护清单对**同一个路径**的判定与规则声明必须一致；
+    /// 一旦不一致，规则被拒绝——界面因此永远不会同时显示两个互相矛盾的标签。
+    func test规则声明与内置保护不一致时整条规则不可用() throws {
+        let home = try makeHome()
+        let claude = try decode(RuleFixtures.claudeCodeJSON)
+        let bad = try decode(RuleAdmissionFixtures.claudeShellSnapshotsCacheJSON)
+
+        let report = RuleSetAdmission.admit(rules: [claude, bad], homeDirectory: home)
+
+        XCTAssertEqual(report.usableRules.map(\.id), ["claude-code"])
+        XCTAssertEqual(report.rejections.map(\.ruleIdentifier), ["claude-code-2"])
+        XCTAssertEqual(report.rejections.first?.reason.isProtectionMonotonicityViolation, true)
+    }
 
     func test把内置受保护路径改判为可归档的规则被拒绝() throws {
         let home = try makeHome()
@@ -225,7 +257,7 @@ final class RuleSetAdmissionTests: XCTestCase {
         let message = rejection?.description ?? ""
         XCTAssertTrue(message.contains("classification[2].category"), message)
         XCTAssertTrue(message.contains("auth.json"), message)
-        XCTAssertTrue(message.contains("不能把它降低"), message)
+        XCTAssertTrue(message.contains("只能声明为受保护"), message)
     }
 }
 
@@ -334,6 +366,33 @@ private enum RuleAdmissionFixtures {
     { "pattern": "config.toml", "category": "protected" },
     { "pattern": "auth.json", "category": "archivableSession" },
     { "pattern": "prompts/**", "category": "protected" }
+  ]
+}
+"""
+
+    /// 把内置受保护条目 `claude-code/shell-snapshots` 改判成缓存与日志。
+    static let claudeShellSnapshotsCacheJSON = """
+{
+  "schemaVersion": 1,
+  "id": "claude-code-2",
+  "displayName": "Claude Code（快照当成缓存）",
+  "roots": [{ "path": "~/.claude", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "projects/<encodedPath>/<uuid>.jsonl", "category": "archivableSession" },
+    { "pattern": "shell-snapshots/**", "category": "cacheAndLog" }
+  ]
+}
+"""
+
+    /// 把内置受保护条目 `claude-code/settings` 改判成不确定。
+    static let claudeSettingsUncertainJSON = """
+{
+  "schemaVersion": 1,
+  "id": "user-extension",
+  "displayName": "用户扩展工具",
+  "roots": [{ "path": "~/.claude", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "settings*.json", "category": "uncertain" }
   ]
 }
 """

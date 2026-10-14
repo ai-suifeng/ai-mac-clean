@@ -60,7 +60,9 @@ final class ToolRuleDecodingTests: XCTestCase {
         let byPattern = Dictionary(uniqueKeysWithValues: rule.classification.map { ($0.pattern.canonicalString, $0.category) })
         XCTAssertEqual(byPattern["projects/<encodedPath>/<uuid>.jsonl"], .archivableSession)
         XCTAssertEqual(byPattern["skills/**"], .protected)
-        XCTAssertEqual(byPattern["shell-snapshots/**"], .cacheAndLog)
+        // `shell-snapshots/**` 与内置受保护条目 `claude-code/shell-snapshots` 重叠，
+        // 因此声明为受保护：改判成缓存同样会被规则集准入拒绝。
+        XCTAssertEqual(byPattern["shell-snapshots/**"], .protected)
         XCTAssertEqual(byPattern["history.jsonl"], .protected)
     }
 
