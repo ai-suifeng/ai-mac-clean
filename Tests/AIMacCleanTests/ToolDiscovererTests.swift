@@ -174,7 +174,7 @@ final class ToolDiscovererTests: XCTestCase {
         )
 
         let result = ToolDiscoverer(
-            rules: try admittedRules([DiscoveryFixture.openCodeJSON]),
+            rules: try admittedBundledRules(),
             homeDirectory: fixture.homePath
         ).discover()
 
@@ -444,6 +444,108 @@ final class ToolDiscovererTests: XCTestCase {
         }
     }
 
+    // MARK: - 切片 11：用内置规则集扫一遍实测形状的假主目录
+
+    func test内置规则集在实测形状的假主目录上把五个工具根都发现出来() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // Claude Code：单横线编码路径 + 旧版子代理转录，**没有** file-history/、todos/、statsig/。
+        try fixture.makeFile(".claude/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
+        try fixture.makeFile(".claude/projects/-Users-xiaowei-amc-wt-12/agent-1c2d3e4f-5a6b-7c8d-9e0f-1a2b3c4d5e6f.jsonl")
+        try fixture.makeFile(".claude/skills/review/SKILL.md", contents: "技能")
+        // Codex：明文与 .zst 并存 + 扁平 archived_sessions + fork 双 UUID。
+        try fixture.makeFile(
+            ".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: #"{"type":"session_meta","payload":{"cwd":"/Users/xiaowei/work"}}"# + "\n"
+        )
+        try fixture.makeFile(
+            ".codex/archived_sessions/rollout-2026-10-02T09-08-28-"
+                + "3e4f5a6b-7c8d-9e0f-1a2b-3c4d5e6f7a8b_4f5a6b7c-8d9e-0f1a-2b3c-4d5e6f7a8b9c.jsonl.zst",
+            contents: ""
+        )
+        // Cursor：主转录 + 同级子代理转录。
+        try fixture.makeFile(
+            ".cursor/projects/-Users-xiaowei-amc-wt-12/agent-transcripts/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f/1c2d3e4f-5a6b-7c8d-9e0f-1a2b3c4d5e6f.jsonl"
+        )
+        // DeepSeek Harness：双横线编码路径 + .zstd。
+        try fixture.makeFile(
+            "Library/Application Support/deepseek-harness-desktop/harness-home"
+                + "/sessions/--Users-xiaowei-work-amc-wt-12--/session-9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f"
+                + "/session.jsonl.zstd",
+            contents: ""
+        )
+        // OpenCode：非标准位置，规则只声明 `storage` 这个目录形态（PRD §5.3：只做发现）。
+        try fixture.makeFile(".local/share/opencode/storage/session.db", contents: "")
+
+        let result = ToolDiscoverer(
+            rules: try admittedBundledRules(),
+            hints: DiscoveryHints(
+                nameKeywords: [
+                    "claude-code": ["claude"],
+                    "codex-cli": ["codex"],
+                    "cursor": ["cursor"],
+                    "deepseek-harness": ["deepseek"],
+                    "opencode": ["opencode"],
+                ],
+                negativeNamePatterns: ["*bak*", ".claude-*", ".codexbar"]
+            ),
+            externalEvidence: ExternalEvidence(applicationNames: ["Claude"], commandNames: ["codex"]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertEqual(
+            Set(result.candidates.map { $0.ruleIdentifier ?? "" }),
+            ["claude-code", "codex-cli", "cursor", "deepseek-harness", "opencode"],
+            "五个实测形状的工具根都要被发现：\(result.candidates.map { ($0.displayPath, $0.ruleIdentifier ?? "") })"
+        )
+
+        func candidate(_ identifier: String) throws -> Candidate {
+            try XCTUnwrap(result.candidates.first { $0.ruleIdentifier == identifier })
+        }
+
+        // Claude：有结构 + 文件头字段 + 同名 App → 高。
+        let claude = try candidate("claude-code")
+        XCTAssertEqual(claude.displayPath, "~/.claude")
+        XCTAssertEqual(claude.confidence, .high)
+        XCTAssertTrue(claude.signals.structuralFingerprints.contains("projects/<encodedPath>/<uuid>.jsonl"))
+        XCTAssertTrue(claude.signals.structuralFingerprints.contains("projects/<encodedPath>/agent-<uuid>.jsonl"))
+
+        // Codex：fork 文件名与扁平归档目录都命中。
+        let codex = try candidate("codex-cli")
+        XCTAssertEqual(codex.confidence, .high)
+        XCTAssertTrue(
+            codex.signals.structuralFingerprints.contains("archived_sessions/rollout-<ISO>-<uuid:parent>_<uuid:fork>.jsonl[.zst]"),
+            "fork 会话的文件名含两个 UUID（User Story 26）：\(codex.signals.structuralFingerprints)"
+        )
+
+        // Cursor：第 5 层的主转录。
+        let cursor = try candidate("cursor")
+        XCTAssertEqual(cursor.confidence, .medium, "Cursor 规则没有声明文件头字段，也没有同名命令")
+        XCTAssertTrue(
+            cursor.signals.structuralFingerprints.contains(
+                "projects/<encodedPath>/agent-transcripts/<uuid>/<uuid>.jsonl"
+            )
+        )
+
+        // Harness：zstd 会话只按路径与扩展名识别，不解压。
+        let harness = try candidate("deepseek-harness")
+        XCTAssertEqual(
+            harness.displayPath,
+            "~/Library/Application Support/deepseek-harness-desktop/harness-home"
+        )
+        XCTAssertEqual(harness.confidence, .medium)
+
+        // OpenCode：只有目录形态可依，规则不声明可归档形态，因此停在「中」。
+        let openCode = try candidate("opencode")
+        XCTAssertEqual(openCode.displayPath, "~/.local/share/opencode")
+        XCTAssertEqual(openCode.confidence, .medium)
+
+        // 一个候选都没落在夹具树外。
+        XCTAssertTrue(result.candidates.allSatisfy { $0.toolRootPath.hasPrefix(fixture.homePath) })
+    }
+
     // MARK: - 切片 10：扫描位置的筛选口径与外部佐证采集
 
     func test主目录扫描根只看隐藏目录() throws {
@@ -690,6 +792,18 @@ final class ToolDiscovererTests: XCTestCase {
 }
 
 // MARK: - 辅助
+
+/// 内置规则文件（issue #15）过一遍规则集准入（issue #11）。
+///
+/// 发现器因此可以在**真实出厂规则**上被断言：新增工具 = 新增一个规则文件（User Story 20）。
+private func admittedBundledRules() throws -> [ToolRule] {
+    let directory = try XCTUnwrap(BuiltInRuleResources.directory, "内置规则应当是 bundle 资源。")
+    let load = RuleLoader.loadRules(inDirectory: directory)
+    XCTAssertEqual(load.diagnostics.map(\.errorDescription), [], "内置规则必须全部读得进来。")
+    let report = RuleSetAdmission.admit(rules: load.rules, homeDirectory: NSTemporaryDirectory())
+    XCTAssertTrue(report.rejections.isEmpty, "内置规则不该被准入拒绝：\(report.rejections)")
+    return report.usableRules
+}
 
 /// 规则夹具先过一遍规则集准入（issue #11）：发现器只消费**已验证可用**的规则集。
 private func admittedRules(_ ruleJSON: [String]) throws -> [ToolRule] {
