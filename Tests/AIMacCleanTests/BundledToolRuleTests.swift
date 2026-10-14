@@ -404,7 +404,7 @@ final class BundledToolRuleTests: XCTestCase {
         XCTAssertEqual(openCode.roots.map(\.path), ["~/.local/share/opencode"])
         XCTAssertEqual(openCode.roots.map(\.role), [.toolRoot])
 
-        // SQLite 私有形态：PRD §5.1 归「不确定」，本阶段锁定、只展示，不声明可归档会话。
+        // SQLite 私有形态：PRD §5.1 归「不确定」，本阶段仅展示占用，不声明可归档会话。
         XCTAssertEqual(Set(openCode.classification.map(\.category)), [.uncertain])
         XCTAssertEqual(openCode.cascade, [])
         XCTAssertFalse(openCode.selfCompressed)

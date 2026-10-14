@@ -34,7 +34,7 @@
     { "pattern": "skills*/**", "category": "protected", "note": "技能目录（含 `skills-x` 之类的变体）。" },
     { "pattern": "mcp.json", "category": "protected", "note": "MCP 设置。" },
     { "pattern": "hooks.json", "category": "protected", "note": "钩子设置。" },
-    { "pattern": "assets/**", "category": "uncertain", "note": "PRD §5.4：形态未实测，保守归入不确定，只展示、锁定。" },
+    { "pattern": "assets/**", "category": "uncertain", "note": "PRD §5.4：形态未实测，保守归入不确定，仅展示占用。" },
     { "pattern": "canvases/**", "category": "uncertain", "note": "同上。" },
     { "pattern": "mcps/**", "category": "uncertain", "note": "同上。" },
     { "pattern": "terminals/**", "category": "uncertain", "note": "同上。" }

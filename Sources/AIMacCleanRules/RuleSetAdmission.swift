@@ -4,7 +4,7 @@ import Foundation
 public enum RuleRejectionReason: Equatable, Sendable {
     /// 保护单调性违规：用户规则把内置受保护路径降级成了更弱的类别。
     case protectionMonotonicity(ProtectionDowngrade)
-    /// 规则把「不确定」的数据降级成了可归档（PRD §5.1：不确定只展示、锁定）。
+    /// 规则把「不确定」的数据降级成了可归档（PRD §5.1：不确定仅展示占用）。
     case uncertainDowngrade(UncertainDowngrade)
     /// 规则读不进来：结构不合法（含凭空发明的新类别）。
     case malformed(RuleFormatError)
@@ -99,7 +99,7 @@ extension UncertainDowngrade: CustomStringConvertible {
         """
         规则字段 \(field) 把路径 \(pattern) 判为 archivableSession（可归档会话），\
         但该路径落在「不确定」形态 \(uncertainShapeIdentifier) 的范围内。\
-        不确定数据无法安全分类，只能锁定展示，规则不能把它降级为可归档（PRD §5.1）。
+        不确定数据无法安全分类，只能仅展示占用，规则不能把它降级为可归档（PRD §5.1）。
         """
     }
 }

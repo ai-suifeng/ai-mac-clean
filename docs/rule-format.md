@@ -149,7 +149,7 @@ RuleSetAdmission.warnings(forRule: rule, homeDirectory: home)     // [RuleAdmiss
    用户规则只能抬高、不能降低（PRD §8.1、验收 A16、User Story 29）。
 2. **不确定降级**（`uncertainDowngrade`）：模式整片落在 PRD §5.1 点名的「不确定」形态里
    （`*.sqlite*`、`*.pb`、`IndexedDB*`、`leveldb*`、`*.blob*`），却声明成 `archivableSession`。
-   不确定数据无法安全分类，只能锁定展示。
+   不确定数据无法安全分类，只能仅展示占用。
 3. **类别封闭**（`malformed`）：凭空发明新类别，或规则读不进来。
 
 判为 `cacheAndLog` / `uncertain` 落在受保护区域里**不拒绝**——PRD §5.1 的处理列写明这两类
