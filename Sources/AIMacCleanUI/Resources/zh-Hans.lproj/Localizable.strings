@@ -67,6 +67,7 @@
 "discovery.permission.row" = "%1$@（%2$@）";
 "discovery.permission.footnote" = "只有确实遇到授权失败才会出现这个提示。应用不会预先索取完全磁盘访问权限。";
 "discovery.issue.noRules" = "没有加载到任何内置规则文件，候选列表为空。请确认打包时把规则资源一并放进了应用包——这一版还没有可用的工具规则。";
+"discovery.issue.rulesRejected" = "加载到 %@ 条规则，但全部未通过规则集准入（保护单调性校验），候选列表为空。";
 "discovery.issue.hintsUnavailable" = "关键词 / 负向名单词表这次没读到：%@。没有词表时仍可发现候选，但旧快照与伴生小工具不会被降权。";
 "discovery.issue.storeUnreadable" = "确认记录无法读取：%@。为避免覆盖你已有的判断，本次改动没有保存。";
 "discovery.issue.actionFailed" = "操作没有保存成功：%@";

@@ -242,6 +242,33 @@ final class DiscoveryPageModelTests: XCTestCase {
         }
     }
 
+    /// 规则被准入拒绝的条数必须**取自文案目录**，不能在视图模型里拼中文
+    /// （L10n 约定第 3 条：带参数的内容走 `L10n.format`，参数顺序由资源决定）。
+    func test规则被拒绝的条数走文案目录而不是在代码里拼中文() throws {
+        let model = try makeModel(candidates: [], issues: [.noUsableRules(rejectedCount: 3)])
+
+        let text = try XCTUnwrap(model.issueTexts.first)
+        XCTAssertEqual(text, L10n.format(.discoveryIssueRulesRejected, ["3"], language: .simplifiedChinese))
+        XCTAssertTrue(text.contains("3"), "条数必须出现在文案里：\(text)")
+        XCTAssertTrue(
+            text.contains("未通过规则集准入"),
+            "这条文案要说明的是「规则被拒绝」，不是「规则文件没打进包」：\(text)"
+        )
+    }
+
+    /// 英文目录必须也给出这句话——否则切到英文的用户会看到中文。
+    func test规则被拒绝的英文文案存在且条数同样是占位符() throws {
+        let en = L10n.text(.discoveryIssueRulesRejected, language: .english)
+        let formatted = L10n.format(.discoveryIssueRulesRejected, ["7"], language: .english)
+
+        XCTAssertFalse(en.isEmpty)
+        XCTAssertTrue(formatted.contains("7"), "英文文案也要把条数填进去：\(formatted)")
+        XCTAssertNotEqual(
+            en, L10n.Key.discoveryIssueRulesRejected.rawValue,
+            "英文目录缺少 discovery.issue.rulesRejected"
+        )
+    }
+
     // MARK: - 辅助功能读出的文字（User Story 42）
 
     func test候选的辅助功能读出路径与置信度() throws {

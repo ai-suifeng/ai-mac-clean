@@ -98,6 +98,7 @@ public enum L10n {
         case discoveryPermissionRow = "discovery.permission.row"
         case discoveryPermissionFootnote = "discovery.permission.footnote"
         case discoveryIssueNoRules = "discovery.issue.noRules"
+        case discoveryIssueRulesRejected = "discovery.issue.rulesRejected"
         case discoveryIssueHintsUnavailable = "discovery.issue.hintsUnavailable"
         case discoveryIssueStoreUnreadable = "discovery.issue.storeUnreadable"
         case discoveryIssueActionFailed = "discovery.issue.actionFailed"

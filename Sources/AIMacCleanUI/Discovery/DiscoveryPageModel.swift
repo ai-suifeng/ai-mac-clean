@@ -248,7 +248,7 @@ public final class DiscoveryPageModel: ObservableObject {
             case let .hintsUnavailable(reason):
                 return L10n.format(.discoveryIssueHintsUnavailable, [reason])
             case let .noUsableRules(rejectedCount):
-                return L10n.text(.discoveryIssueNoRules) + "（\(rejectedCount) 条规则未通过准入）"
+                return L10n.format(.discoveryIssueRulesRejected, ["\(rejectedCount)"])
             }
         }
     }
