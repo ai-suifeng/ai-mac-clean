@@ -283,7 +283,8 @@ private struct ToolRowView: View {
             }
             Spacer()
             Button(actionTitle, action: action)
-                .accessibilityLabel("\(actionTitle)：\(title)")
+                // 动作名 + 具体是哪一行，辅助技术读出来才不会分不清。
+                .accessibilityLabel([actionTitle, title].joined(separator: "："))
         }
     }
 }
