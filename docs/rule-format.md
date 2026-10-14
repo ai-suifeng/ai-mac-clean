@@ -116,6 +116,62 @@ JSON 还能直接进 `JSONDecoder`、输出确定（键排序），往返序列�
 }
 ```
 
+## 规则集准入（Seam 2）
+
+加载器只管「读得进来」，准入（`RuleSetAdmission`）管「能不能用」。入口有两个：
+
+```swift
+RuleSetAdmission.admit(rules: [ToolRule], homeDirectory: String) -> RuleAdmissionReport
+RuleSetAdmission.admit(rawRules: [RawToolRule], homeDirectory: String) -> RuleAdmissionReport
+```
+
+`homeDirectory` 由调用方显式传入，本层不读 `NSHomeDirectory()`。
+
+结果同时表达三件事：
+
+| 成员 | 含义 |
+|---|---|
+| `usableRules` | 已验证可用的规则集（被拒绝的规则整体不在里面） |
+| `rejections` | 被拒绝的规则，一条一个原因，原因文本可直接展示 |
+| `warnings` | 不构成降级、但标签与内置保护不一致的声明 |
+
+单条规则的判定也可以直接打，不必先凑一批：
+
+```swift
+RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)   // RuleRejection?
+RuleSetAdmission.warnings(forRule: rule, homeDirectory: home)     // [RuleAdmissionWarning]
+```
+
+### 拒绝规则的三种情形
+
+1. **保护单调性**（`RuleRejectionReason.protectionMonotonicity`）：某条分类条目声明的模式
+   **整片**落在内置受保护区域内，且类别是 `archivableSession`。内置受保护路径是下界，
+   用户规则只能抬高、不能降低（PRD §8.1、验收 A16、User Story 29）。
+2. **不确定降级**（`uncertainDowngrade`）：模式整片落在 PRD §5.1 点名的「不确定」形态里
+   （`*.sqlite*`、`*.pb`、`IndexedDB*`、`leveldb*`、`*.blob*`），却声明成 `archivableSession`。
+   不确定数据无法安全分类，只能锁定展示。
+3. **类别封闭**（`malformed`）：凭空发明新类别，或规则读不进来。
+
+判为 `cacheAndLog` / `uncertain` 落在受保护区域里**不拒绝**——PRD §5.1 的处理列写明这两类
+同样「只展示大小，不动」，不授予删除权限；但会产出 `warnings`，让界面如实说明
+「它其实仍受保护」，而不是让用户以为规则生效了。
+
+### 写规则时的几条纪律
+
+- **判定看的是「整片是否落在受保护区域内」**。`auth.json`、`config.toml`、
+  `settings.json` 这类指名道姓的写法一定会被拒绝；`logs/**` 这类宽泛写法只是写得粗糙，
+  不会被拒绝——因为真正兜底的是代码层的内置保护（PRD §8.3：命中受保护规则的路径即使被
+  规则或用户选中，也直接拒绝归档与移除）。想让「误伤面」变小，就把模式写具体。
+- **占位符按实际取值范围收紧**：`<uuid>` 只可能是十六进制与短横线，`<date:…>` 只可能是数字，
+  `<encodedPath>` / `<名字>` 是**不含点**的单段标识符。因此
+  `projects/<encodedPath>/<uuid>.jsonl` 不会被内置条目 `claude-code/history` 误伤。
+- **工具根按符号链接的真实目标判定**：`~/.codex/skills` → `~/.agents/skills` 形态下，
+  整棵工具根都是受保护区域（PRD §14.5）。
+- **规则容忍缺失**：声明的路径在磁盘上不存在不是拒绝理由（User Story 22），
+  准入判定完全走路径形状、不 stat 磁盘。
+- **拒绝粒度是单条规则**：一条坏规则不会让其余已知工具的规则失效，
+  但它整体（包括它自己声明为受保护的条目）都不会进入可用规则集。
+
 ## 加载器行为
 
 - `RuleLoader.loadRule(at:)` / `loadRule(from:source:)`：单文件，失败抛 `RuleLoadError`。
