@@ -92,7 +92,11 @@ public struct ToolDiscoverer {
                     guard entry.isDirectory, !entry.isSymbolicLink, seenPaths.insert(entry.path).inserted else {
                         continue
                     }
-                    guard let candidate = candidate(forDirectory: entry, unreadable: &unreadable) else { continue }
+                    guard let candidate = candidate(
+                        forDirectory: entry,
+                        scanRootPath: scanRoot.path,
+                        unreadable: &unreadable
+                    ) else { continue }
                     candidates.append(candidate)
                 }
             }
@@ -117,7 +121,13 @@ public struct ToolDiscoverer {
                 isDirectory: true,
                 isSymbolicLink: false
             )
-            guard let candidate = candidate(forDirectory: entry, unreadable: &unreadable) else { continue }
+            guard let candidate = candidate(
+                forDirectory: entry,
+                // 补漏来的路径深度不定，把它归到**最近的那个扫描根**名下，
+                // 名称判定才不会越过扫描根去看更上面的段。
+                scanRootPath: enclosingScanRoot(of: path, in: scanRoots)?.path,
+                unreadable: &unreadable
+            ) else { continue }
             candidates.append(candidate)
         }
 
@@ -142,6 +152,13 @@ public struct ToolDiscoverer {
         }
     }
 
+    /// 覆盖 `path` 的、最深的那个扫描根；没有任何扫描根覆盖它时返回 `nil`。
+    private func enclosingScanRoot(of path: String, in scanRoots: [ScanRoot]) -> ScanRoot? {
+        scanRoots
+            .filter { path == $0.path || path.hasPrefix($0.path.hasSuffix("/") ? $0.path : $0.path + "/") }
+            .max { $0.path.count < $1.path.count }
+    }
+
     /// 规则集里声明过的全部工具根目录的绝对路径（只认 `role == .toolRoot`）。
     private func declaredToolRootPaths() -> [String] {
         var seen: Set<String> = []
@@ -163,6 +180,7 @@ public struct ToolDiscoverer {
     /// 名称关键词、负向名单、外部佐证都不参与「是否入列」这道判断。
     private func candidate(
         forDirectory entry: ShallowDirectoryReader.Entry,
+        scanRootPath: String?,
         unreadable: inout [UnreadableDirectory]
     ) -> Candidate? {
         guard let rule = rule(declaringToolRootAt: entry.path) else { return nil }
@@ -195,7 +213,7 @@ public struct ToolDiscoverer {
             demotions.append(.missingStructuralFingerprint)
         }
 
-        if let negative = negativePattern(matching: entry.path) {
+        if let negative = negativePattern(matching: entry.path, scanRootPath: scanRootPath) {
             // 负向名单：已知易误判的名字（`-bak` 旧快照、工具伴生小工具）降权并标疑似
             // （User Story 5、6、PRD A1）。**降权不改变入列**——它已经因为结构证据入列了。
             confidence = .low
@@ -246,12 +264,43 @@ public struct ToolDiscoverer {
         }
     }
 
-    /// 命中的负向名单模式（`*` 匹配任意字符，忽略大小写），逐段比对。
-    private func negativePattern(matching path: String) -> String? {
-        let components = path.split(separator: "/").map(String.init)
+    /// 命中的负向名单模式（`*` 匹配任意字符，忽略大小写）。
+    ///
+    /// ## 只比对扫描器真正判定的那些段
+    ///
+    /// 比对范围是：**工具根自身的名字**，加上它**相对所属扫描根**的那几段。
+    /// 扫描根**本身不是被判定的对象**——它是起点。
+    ///
+    /// 早先的实现把整条路径逐段拆开全比一遍，于是 `$HOME` **以上**的段也进了比对范围：
+    /// 一个叫 `…-backup/Users/x` 的主目录会把该主目录下**每一个**候选都降权成疑似，
+    /// 界面还写「命中负向名单 *backup*」——而那条路径本身没有任何问题。
+    /// 名字判定只能落在扫描器看过的那层，否则等于让用户目录名替工具背锅。
+    ///
+    /// `scanRootPath` 为 `nil`（补漏来的路径不落在任何扫描根之下）时只比对最后一段：
+    /// 宁可漏判降权，也不误判——降权会挡住用户看见真正的高置信度候选。
+    private func negativePattern(matching path: String, scanRootPath: String?) -> String? {
+        let components = judgedComponents(of: path, scanRootPath: scanRootPath)
+        guard !components.isEmpty else { return nil }
+
         return hints.negativeNamePatterns.first { pattern in
             components.contains { GlobPattern.matches(pattern: pattern, text: $0) }
         }
+    }
+
+    /// 名字判定真正看的那几段：相对扫描根的路径（末段一定在内）。
+    private func judgedComponents(of path: String, scanRootPath: String?) -> [String] {
+        let all = path.split(separator: "/").map(String.init)
+
+        var relative: ArraySlice<String>
+        if let scanRootPath {
+            let root = scanRootPath.split(separator: "/").map(String.init)
+            relative = all.count >= root.count ? all.dropFirst(root.count)[...] : all[...]
+        } else {
+            relative = all.suffix(1)[...]
+        }
+
+        guard let last = relative.last else { return [] }
+        return Array(relative.dropLast()) + [last]
     }
 
     /// 文件头字段特征 → 外部佐证。

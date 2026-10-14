@@ -293,6 +293,40 @@ final class ToolDiscovererTests: XCTestCase {
         )
     }
 
+    /// 负向名单只比对**扫描器真正判定的那些段**：工具根自身的名字，以及它相对扫描根的路径。
+    ///
+    /// 它绝不该去比对 `$HOME` **以上**的段：否则一个叫 `…-backup/Users/x` 的主目录
+    /// 会把该主目录下每一个候选都降权成疑似——降权理由写在界面上却是
+    /// 「命中负向名单 *backup*」，而那条路径本身一点问题都没有。
+    func test负向名单不比对主目录以上的路径段() throws {
+        let outer = try TemporaryDirectoryFixture(named: "host")
+        defer { outer.remove() }
+
+        // 主目录自己的名字里含 `backup`——比 `$HOME` 高一层的路径段。
+        let home = try outer.makeDirectory("my-backup-home").path
+        try writeTestFile(
+            relativePath: "my-backup-home/.claude/projects/-Users-xiaowei-amc-wt-12/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: DiscoveryFixture.sampleTranscriptLine,
+            in: outer
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON]),
+            hints: DiscoveryHints(negativeNamePatterns: ["*backup*"]),
+            homeDirectory: home
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(
+            candidate.demotions, [],
+            "主目录的名字不是扫描器判定的对象，命中它说明比对范围越过了扫描根：\(candidate.demotions)"
+        )
+        XCTAssertFalse(candidate.isSuspicious)
+        // 结构指纹 + 文件头字段特征 = 高（这里刻意不降权，主目录叫什么与它无关）。
+        XCTAssertEqual(candidate.confidence, .high)
+    }
+
     func test名称关键词只影响顺序不影响入列() throws {
         let fixture = try DiscoveryFixture()
         defer { fixture.home.remove() }
