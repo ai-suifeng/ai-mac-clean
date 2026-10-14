@@ -344,4 +344,69 @@ final class BundledToolRuleTests: XCTestCase {
         XCTAssertTrue(note.contains("不可无损逆解"),
                       "Claude Code 的编码方案备注应当说明它不可无损逆解：\(note)")
     }
+
+    // MARK: Slice 6：Cursor / DeepSeek Harness 格式可表达，OpenCode 只做发现
+
+    func testCursor的主转录与子代理转录跨文件级联() throws {
+        let sessionID = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        let turnID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+        let root = try makeToolRoot(".cursor", files: [
+            "projects/-Users-xiaowei-demo/agent-transcripts/\(sessionID)/\(turnID).jsonl",
+            "projects/-Users-xiaowei-demo/agent-transcripts/\(sessionID)/subagents/\(turnID).jsonl",
+        ])
+        let (_, report) = try loadBundledRules()
+        let rule = try XCTUnwrap(report.usableRule(id: "cursor"))
+        let transcripts = try XCTUnwrap(rule.structuralFingerprint?.sessionFilePatterns)
+
+        for path in try relativeFiles(under: root) {
+            XCTAssertTrue(matches(transcripts, path), "Cursor 会话文件模式应覆盖 \(path)")
+            XCTAssertEqual(report.category(forRelativePath: path, ruleID: "cursor"),
+                           .archivableSession)
+        }
+
+        // 一个会话跨主转录 + 子代理多个文件，必须声明同级级联。
+        let sibling = try XCTUnwrap(rule.cascade.first { $0.kind == .siblingTranscripts })
+        XCTAssertTrue(matches([sibling.pattern], "subagents/\(turnID).jsonl"))
+
+        // `~/Library/Application Support/Cursor` 实测 14G，全是 Electron 内部存储：
+        // 声明为 displayOnly，只展示占用，不参与准入与分类。
+        let displayOnly = rule.roots.filter { $0.role == .displayOnly }
+        XCTAssertEqual(displayOnly.map(\.path), ["~/Library/Application Support/Cursor"])
+    }
+
+    func testHarness一个会话一个文件且会话标识在父目录名() throws {
+        let sessionID = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        let root = try makeToolRoot(
+            "Library/Application Support/deepseek-harness-desktop/harness-home",
+            files: ["sessions/--Users-xiaowei-demo--/session-\(sessionID)/session.jsonl.zstd"]
+        )
+        let (_, report) = try loadBundledRules()
+        let rule = try XCTUnwrap(report.usableRule(id: "deepseek-harness"))
+        let transcripts = try XCTUnwrap(rule.structuralFingerprint?.sessionFilePatterns)
+
+        let path = "sessions/--Users-xiaowei-demo--/session-\(sessionID)/session.jsonl.zstd"
+        XCTAssertEqual(try relativeFiles(under: root), [path])
+        XCTAssertTrue(matches(transcripts, path))
+        XCTAssertEqual(report.category(forRelativePath: path, ruleID: "deepseek-harness"),
+                       .archivableSession)
+
+        let naming = try XCTUnwrap(rule.sessionFileNaming)
+        XCTAssertEqual(naming.sessionIDSource, .parentDirectoryName)
+        XCTAssertTrue(naming.stableSessionIdentifier)
+        XCTAssertTrue(rule.selfCompressed, "Harness 的会话文件本身就是 .zstd。")
+    }
+
+    func testOpenCode只做发现不声明任何可归档形态() throws {
+        let (rules, _) = try loadBundledRules()
+        let openCode = try XCTUnwrap(rules.first { $0.id == "opencode" })
+
+        // 非标准位置：藏在 `~/.local/share/opencode`，不能因为路径不常规就漏掉（User Story 7）。
+        XCTAssertEqual(openCode.roots.map(\.path), ["~/.local/share/opencode"])
+        XCTAssertEqual(openCode.roots.map(\.role), [.toolRoot])
+
+        // SQLite 私有形态：PRD §5.1 归「不确定」，本阶段锁定、只展示，不声明可归档会话。
+        XCTAssertEqual(Set(openCode.classification.map(\.category)), [.uncertain])
+        XCTAssertEqual(openCode.cascade, [])
+        XCTAssertFalse(openCode.selfCompressed)
+    }
 }
