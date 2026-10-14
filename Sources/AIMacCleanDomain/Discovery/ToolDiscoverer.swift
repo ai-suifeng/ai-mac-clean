@@ -19,6 +19,15 @@ import AIMacCleanRules
 ///    候选的受保护判定另按链接真实目标进行（issue #9）。
 /// 3. **浅扫**：只看扫描根的一级子目录，不递归计算体积（User Story 2、44）。
 ///    比对结构指纹时的下潜有层数与条目数上限。
+///    **已知偏差（刻意保留，PRD §13.1 要求把偏差记下来）**：spec / US2 写的是
+///    「浅扫只遍历一级子目录」，但 `discover(scanRoots:)` 还会**补一次**规则声明的工具根，
+///    且不限制它在扫描根下的深度。原因有两条，缺一不可：
+///    - DeepSeek Harness 的真实工具根是 `~/Library/Application Support/deepseek-harness-desktop/harness-home`，
+///      是那一层目录的**孙子**（PRD §14.5）。只扫一层就永远发现不了它，
+///      而「发现非标准位置」是 User Story 7 的硬要求。
+///    - OpenCode 的数据根在 `~/.local/share/opencode`（PRD §5.4），同样不是一层。
+///    补漏仍然**只做一次存在性判断**（不递归、不列举），因此递归成本不变；准入口径也不变：
+///    照样要过结构指纹才能拿到「中」以上，声明在非隐藏位置的规则也不因此被捡起来。
 /// 4. **错误按目录隔离**：读不到一个目录只跳过它自己，并在结果里说明；
 ///    整体扫描不失败，空结果是成功（User Story 13、14）。
 /// 5. **只读元数据与文件头**：文件内容最多读 `headerByteLimit` 字节，且只读开头；
@@ -53,6 +62,21 @@ public struct ToolDiscoverer {
     }
 
     /// 按给定的扫描根浅扫一次。
+    ///
+    /// ## 与「只遍历一级子目录」的偏差
+    ///
+    /// spec #7 / US2 描述的是「浅扫只遍历一级子目录」。本方法在**这一层之外还补一次**：
+    /// 规则声明的每一个工具根目录，只要它确实存在、不是符号链接，且不违反扫描根的
+    /// 隐藏目录筛选口径（`~` 下只看隐藏目录），都会被看一眼——**不论它在扫描根下深几层**。
+    ///
+    /// 这是**刻意保留的偏差**，记在这里而不是悄悄做（PRD §13.1）：
+    /// DeepSeek Harness 的真实工具根 `…/deepseek-harness-desktop/harness-home` 是
+    /// `~/Library/Application Support` 的孙子（PRD §14.5），OpenCode 的数据根在
+    /// `~/.local/share/opencode`——只扫一层就发现不了它们，而「发现非标准位置」是
+    /// User Story 7 的要求。
+    ///
+    /// 补的那一次只判断声明路径本身存在与否（不列举、不递归），因此递归成本不变；
+    /// 准入口径也不放宽：照样要过结构指纹才能拿到「中」以上。
     public func discover(scanRoots: [ScanRoot]) -> DiscoveryResult {
         var unreadable: [UnreadableDirectory] = []
         var candidates: [Candidate] = []
@@ -79,6 +103,7 @@ public struct ToolDiscoverer {
         // ——它是那一层目录的**孙子**，只扫一层就永远发现不了它。
         // 这里只做一次存在性判断（不递归、不列举），因此仍然属于浅扫；
         // 它也不放宽准入：照样要过结构指纹才能拿到「中」以上。
+        // 这段补漏是相对 spec「只遍历一级子目录」的**已知偏差**，理由见方法文档注释。
         for path in declaredToolRootPaths() where seenPaths.insert(path).inserted {
             // 但它**不能绕过扫描位置的筛选口径**：`~` 下只看隐藏目录（PRD §4.2），
             // 因此声明在 `~/notes` 这种非隐藏位置的规则不该被这条补漏捡起来。

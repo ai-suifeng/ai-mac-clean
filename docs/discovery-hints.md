@@ -58,6 +58,18 @@ PRD §4.3 列的是 `*-bak`、`*.bak*`、`*-backup*` 这一族形状，而实测
 （`~/.claude-tap`、`~/.codexbar`、`~/.codexhost`、`~/.antigravity_cockpit`）
 应该逐个写全名，而不是靠 `claude*` 之类的粗放模式。
 
+## 扫描深度：一条已记录的偏差
+
+spec #7 / US2 写的是「浅扫只遍历一级子目录」。实现里**多了一步**：规则声明的每一个工具根
+目录，只要确实存在、不是符号链接、且不违反扫描根的隐藏目录筛选口径（`~` 下只看隐藏目录），
+都会被单独看一眼——**不论它在扫描根下深几层**。
+
+这是刻意保留的偏差，记下来而不是悄悄做（PRD §13.1 要求记录偏差）：DeepSeek Harness 的真实
+工具根 `~/Library/Application Support/deepseek-harness-desktop/harness-home` 是那一层目录的
+**孙子**（PRD §14.5），OpenCode 的数据根在 `~/.local/share/opencode`——只扫一层就发现不了它们，
+而「发现非标准位置」是 **US7** 的要求。补的那一次只判断存在性，不列举也不递归，递归成本不变，
+准入口径也不放宽（照样要过结构指纹才能拿到「中」以上）。
+
 ## 关键词之外还有一类证据
 
 同名 App（`/Applications`、`~/Applications`）与 PATH 中的同名命令是**外部佐证**

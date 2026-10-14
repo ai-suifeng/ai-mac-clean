@@ -183,6 +183,49 @@ final class ToolDiscovererTests: XCTestCase {
         XCTAssertEqual(candidate.ruleIdentifier, "opencode")
     }
 
+    /// **已记录的偏差**（PRD §13.1）：spec #7 / US2 写的是「浅扫只遍历一级子目录」，
+    /// 但规则声明的工具根在扫描根之下**任意深度**都会被补看一次。
+    ///
+    /// 理由：Harness 的工具根是 `~/Library/Application Support` 的孙子（PRD §14.5），
+    /// 只扫一层就永远发现不了它，而「发现非标准位置」是 US7 的要求。
+    ///
+    /// 这条断言钉住偏差的**成本边界**：补漏只判断声明路径本身存在与否，
+    /// 路径不存在就是「没有可看的东西」，不会为了找它去枚举父目录。
+    func test扫描深度偏差只判断声明路径存在与否而不去枚举父目录() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 扫描根 `~/Library/Application Support` 的孙子：补漏能捡起来。
+        try fixture.makeFile(
+            "Library/Application Support/deepseek-harness-desktop/harness-home"
+                + "/sessions/--Users-xiaowei-work-amc-wt-12--/session-9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f"
+                + "/session.jsonl.zstd",
+            contents: ""
+        )
+        // 同一条规则的**另一个**声明根，路径在磁盘上压根不存在：
+        // 补漏对它是「没有可看的东西」，而不是一次失败，更不会去枚举它缺失的父目录。
+        let ghostRule = RuleFixtures.harnessJSON
+            .replacingOccurrences(
+                of: "\"~/Library/Application Support/deepseek-harness-desktop/harness-home\"",
+                with: "\"~/Library/Application Support/never-created-desktop/harness-home\""
+            )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([ghostRule]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertEqual(
+            result.candidates.map(\.toolRootPath),
+            [],
+            "声明的工具根在磁盘上不存在时，补漏不产生候选：\(result.candidates.map(\.toolRootPath))"
+        )
+        XCTAssertTrue(
+            result.unreadableDirectories.isEmpty,
+            "路径缺失不是读不到，不该被报成权限类问题：\(result.unreadableDirectories)"
+        )
+    }
+
     // MARK: - 切片 6：负向名单与干扰项（User Story 5、6、9；PRD A1）
 
     func test伴生小工具与只有名字像的目录都不进候选() throws {
