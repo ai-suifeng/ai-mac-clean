@@ -133,4 +133,126 @@ final class BundledToolRuleTests: XCTestCase {
             }
         }
     }
+
+    // MARK: Slice 3：Claude Code 的新旧两种结构（User Story 22 / 23）
+
+    /// 在临时主目录下建一个工具根，并放入若干文件（只建文件，不写内容）。
+    private func makeToolRoot(_ relativePath: String, files: [String]) throws -> URL {
+        let root = try fixture.makeDirectory(relativePath)
+        for file in files {
+            try ProtectedPathTestSupport.createFile(named: file, in: root)
+        }
+        return root
+    }
+
+    /// 工具根下全部文件，相对工具根、以 `/` 分隔。
+    private func relativeFiles(under root: URL) throws -> [String] {
+        let prefix = root.resolvingSymlinksInPath().path + "/"
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else {
+            return []
+        }
+        var paths: [String] = []
+        for case let url as URL in enumerator {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else { continue }
+            let path = url.resolvingSymlinksInPath().path
+            paths.append(path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path)
+        }
+        return paths.sorted()
+    }
+
+    /// 一条规则声明的模式是否覆盖某条相对路径。
+    private func matches(_ patterns: [PathPattern], _ relativePath: String) -> Bool {
+        patterns.contains { PatternMatching.matches($0, relativePath: relativePath) }
+    }
+
+    func testClaude新版结构只有转录时被识别为可归档会话() throws {
+        // PRD §14.5：新版 `~/.claude` 中 `file-history/`、`todos/`、`statsig/` 均不存在，
+        // 文件历史以 `file-history-snapshot` 内联进转录。
+        let sessionID = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        let root = try makeToolRoot(".claude", files: [
+            "projects/-Users-xiaowei-demo/\(sessionID).jsonl",
+        ])
+        let (_, report) = try loadBundledRules()
+        let rule = try XCTUnwrap(report.usableRule(id: "claude-code"))
+
+        XCTAssertEqual(try relativeFiles(under: root),
+                       ["projects/-Users-xiaowei-demo/\(sessionID).jsonl"])
+        XCTAssertTrue(matches(rule.structuralFingerprint?.sessionFilePatterns ?? [],
+                              "projects/-Users-xiaowei-demo/\(sessionID).jsonl"))
+        XCTAssertEqual(report.category(forRelativePath: "projects/-Users-xiaowei-demo/\(sessionID).jsonl",
+                                       ruleID: "claude-code"),
+                       .archivableSession)
+    }
+
+    func testClaude旧版结构的子代理转录与关联数据也被识别() throws {
+        // 旧结构由 `~/.claudebak` 证实：存在 `agent-*.jsonl`、`file-history/<会话UUID>/<hash>@vN`、
+        // `todos/<会话UUID>-agent-<会话UUID>.json`。
+        let sessionID = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        let agentID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+        let root = try makeToolRoot(".claude", files: [
+            "projects/-Users-xiaowei-demo/\(sessionID).jsonl",
+            "projects/-Users-xiaowei-demo/agent-\(agentID).jsonl",
+            "file-history/\(sessionID)/9f2c1b3a@v1",
+            "todos/\(sessionID)-agent-\(agentID).json",
+        ])
+        let (_, report) = try loadBundledRules()
+        let rule = try XCTUnwrap(report.usableRule(id: "claude-code"))
+        let transcripts = try XCTUnwrap(rule.structuralFingerprint?.sessionFilePatterns)
+
+        let expected = [
+            "projects/-Users-xiaowei-demo/\(sessionID).jsonl",
+            "projects/-Users-xiaowei-demo/agent-\(agentID).jsonl",
+        ]
+        XCTAssertEqual(try relativeFiles(under: root).filter { $0.hasPrefix("projects/") }, expected)
+
+        for path in expected {
+            XCTAssertTrue(matches(transcripts, path), "会话文件模式应覆盖 \(path)")
+            XCTAssertEqual(report.category(forRelativePath: path, ruleID: "claude-code"),
+                           .archivableSession)
+        }
+
+        // 关联数据按会话级联，规则里以 `<uuid>` 占位表达（不是具名占位）。
+        let cascaded = rule.cascade
+        XCTAssertEqual(Set(cascaded.map(\.kind)),
+                       [.siblingTranscripts, .sessionKeyedDirectory, .sessionKeyedFile])
+
+        // `siblingTranscripts` 的基准是主转录**所在目录**（docs/rule-format.md），
+        // 其余两种基准是工具根目录。
+        let sibling = try XCTUnwrap(cascaded.first { $0.kind == .siblingTranscripts }).pattern
+        XCTAssertTrue(matches([sibling], "agent-\(agentID).jsonl"))
+        let keyedDirectory = try XCTUnwrap(cascaded.first { $0.kind == .sessionKeyedDirectory }).pattern
+        XCTAssertTrue(matches([keyedDirectory], "file-history/\(sessionID)"))
+        let keyedFile = try XCTUnwrap(cascaded.first { $0.kind == .sessionKeyedFile }).pattern
+        XCTAssertTrue(matches([keyedFile], "todos/\(sessionID)-agent-\(agentID).json"))
+        XCTAssertEqual(report.category(forRelativePath: "file-history/\(sessionID)", ruleID: "claude-code"),
+                       .archivableSession)
+        XCTAssertEqual(report.category(forRelativePath: "todos/\(sessionID)-agent-\(agentID).json",
+                                       ruleID: "claude-code"),
+                       .archivableSession)
+    }
+
+    func testClaude旧版关联数据缺失时静默跳过不报错() throws {
+        // User Story 22/23：规则声明的路径在磁盘上不存在不是错误。
+        // 这里连工具根本身都不建——准入完全走路径形状，不 stat 磁盘。
+        let emptyHome = try makeHome("empty-home")
+        let (rules, _) = try loadBundledRules()
+        let claude = try XCTUnwrap(rules.first { $0.id == "claude-code" })
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: emptyHome + "/.claude",
+            isDirectory: nil
+        ), "这棵树刻意不创建工具根，用来证明缺失路径被静默跳过。")
+        XCTAssertNil(RuleSetAdmission.rejection(forRule: claude, homeDirectory: emptyHome))
+        XCTAssertEqual(RuleSetAdmission.warnings(forRule: claude, homeDirectory: emptyHome), [])
+
+        // 新版（无关联数据目录）与旧版（有）的声明集合一致，不需要两套规则。
+        let declared = claude.cascade.map(\.pattern.canonicalString)
+        XCTAssertEqual(declared, [
+            "agent-<uuid>.jsonl",
+            "file-history/<uuid>",
+            "todos/<uuid>-agent-<uuid>.json",
+        ])
+    }
 }
