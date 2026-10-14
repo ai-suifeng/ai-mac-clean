@@ -26,6 +26,33 @@ final class ToolDiscovererTests: XCTestCase {
         XCTAssertTrue(result.candidates.isEmpty, "没装任何 AI 工具时应给出空列表，而不是报错或塞进噪声目录")
         XCTAssertTrue(result.unreadableDirectories.isEmpty)
     }
+    // MARK: - 切片 2：结构指纹才准入（User Story 8、9）
+
+    func test命中结构指纹的工具根进候选而名字像没结构的目录不进候选() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 实测形状：`projects/<单横线编码路径>/<uuid>.jsonl`，另有旧版子代理转录 `agent-*.jsonl`。
+        try fixture.makeFile(".claude/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
+        try fixture.makeFile(".claude/projects/-Users-xiaowei-amc-wt-12/agent-1c2d3e4f-5a6b-7c8d-9e0f-1a2b3c4d5e6f.jsonl")
+        // 名字里含 claude，但没有任何结构（PRD A1 的反面教材）。
+        try fixture.makeFile("claude-something/readme.md", contents: "# 不是工具数据")
+
+        let discoverer = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON]),
+            homeDirectory: fixture.homePath
+        )
+
+        let result = discoverer.discover()
+
+        XCTAssertEqual(result.candidates.map(\.toolRootPath), [fixture.homePath + "/.claude"])
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(candidate.ruleIdentifier, "claude-code")
+        XCTAssertTrue(
+            candidate.signals.structuralFingerprints.contains("projects/<encodedPath>/<uuid>.jsonl"),
+            "准入依据必须是结构指纹，实际命中：\(candidate.signals.structuralFingerprints)"
+        )
+    }
 }
 
 // MARK: - 辅助
