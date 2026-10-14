@@ -77,4 +77,60 @@ final class BundledToolRuleTests: XCTestCase {
                        ["Claude Code", "Codex CLI", "Cursor", "DeepSeek Harness", "OpenCode"])
         XCTAssertEqual(rules.map(\.schemaVersion), [Int](repeating: ToolRule.currentSchemaVersion, count: 5))
     }
+
+    // MARK: Slice 2：全部内置规则通过准入
+
+    func test全部内置规则通过准入且零拒绝() throws {
+        let (rules, report) = try loadBundledRules()
+
+        XCTAssertEqual(report.rejections.map(\.description), [],
+                       "内置规则本身触发单调性拒绝就是 bug（issue #15 验收）。")
+        XCTAssertTrue(report.isFullyAdmitted)
+        XCTAssertEqual(report.usableRules.map(\.id), rules.map(\.id))
+    }
+
+    func test内置规则准入零警告() throws {
+        let (_, report) = try loadBundledRules()
+
+        // 警告 = 「声明的类别与内置受保护清单不一致」。内置规则应当直接与内置保护对齐，
+        // 而不是标一个更弱的类别让界面去解释「它其实仍受保护」。
+        XCTAssertEqual(report.warnings.map(\.description), [])
+    }
+
+    func test受保护声明与内置保护清单一致() throws {
+        let home = try makeHome()
+        let (_, report) = try loadBundledRules()
+
+        // 每条声明都配一条实测里真实存在的路径（照抄 PRD §5.4）。
+        let samples: [(rule: String, root: String, relativePaths: [String])] = [
+            ("claude-code", ".claude", ["settings.json", "mcp.json", "history.jsonl",
+                                       "skills/foo/SKILL.md", "commands/bar.md",
+                                       "agents/baz.md", "plugins/qux/plugin.json",
+                                       "shell-snapshots/snapshot-zsh-1700000000000-a1b2c3.sh"]),
+            ("codex-cli", ".codex", ["config.toml", "config.toml.bak", "auth.json",
+                                     "prompts/a.md", "state.sqlite", "state.sqlite-wal"]),
+            ("cursor", ".cursor", ["extensions/ms-vscode.cpptools", "plugins/p",
+                                   "worktrees/w", "skills-x/s", "mcp.json", "hooks.json"]),
+            ("deepseek-harness",
+             "Library/Application Support/deepseek-harness-desktop/harness-home",
+             ["settings.yaml", ".credentials.yaml", "storages/s", "profiles/p"]),
+        ]
+
+        for sample in samples {
+            let toolRoot = (fixture.url.appendingPathComponent(sample.root, isDirectory: true))
+                .resolvingSymlinksInPath().path
+
+            for relativePath in sample.relativePaths {
+                XCTAssertEqual(report.category(forRelativePath: relativePath, ruleID: sample.rule),
+                               .protected,
+                               "规则 \(sample.rule) 应把 \(relativePath) 判为受保护。")
+                XCTAssertTrue(
+                    BuiltInProtectedPaths.isProtected(toolRoot + "/" + relativePath,
+                                                      underToolRoot: toolRoot,
+                                                      homeDirectory: home),
+                    "内置保护清单应覆盖 \(sample.root)/\(relativePath)。"
+                )
+            }
+        }
+    }
 }
