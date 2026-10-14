@@ -183,6 +183,99 @@ final class ToolDiscovererTests: XCTestCase {
         XCTAssertEqual(candidate.ruleIdentifier, "opencode")
     }
 
+    // MARK: - 切片 6：负向名单与干扰项（User Story 5、6、9；PRD A1）
+
+    func test伴生小工具与只有名字像的目录都不进候选() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 实测存在的伴生小工具：`~/.claude-tap`、`~/.codexbar`、`~/.codexhost`、`~/.antigravity_cockpit`。
+        try fixture.makeFile(".claude-tap/config.json", contents: "{}")
+        try fixture.makeFile(".codexbar/settings.toml", contents: "")
+        try fixture.makeFile(".codexhost/notes.md", contents: "")
+        try fixture.makeFile(".antigravity_cockpit/state.json", contents: "{}")
+        // 只有名字像：连 `claude` 这个词都在名字里。
+        try fixture.makeFile("claude-notes/readme.md", contents: "# 笔记")
+        // 有结构、但没有任何规则声明过这个工具根：结构指纹也不能凭空造出候选。
+        try fixture.makeFile(
+            ".codexbar/sessions/2026/10/14/rollout-2026-10-14T09-08-28-"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: ""
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON, RuleFixtures.codexJSON]),
+            hints: DiscoveryHints(
+                nameKeywords: ["claude-code": ["claude"], "codex-cli": ["codex"]],
+                negativeNamePatterns: ["*bak*", "*backup*", ".claude-*", "*.bar", "*.host"]
+            ),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertTrue(
+            result.candidates.isEmpty,
+            "名字像不等于工具：\(result.candidates.map(\.toolRootPath))"
+        )
+    }
+
+    func test负向名单把旧快照目录降为低置信度疑似() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 实测：`~/.claudebak` 是 `~/.claude` 的旧快照（798M），内部确实是会话形状。
+        // 规则声明了它（用户想看得见它），因此它**会**进候选——但必须是「疑似」，
+        // 绝不能是高置信度的工具本身（PRD A1）。
+        try fixture.makeFile(".claudebak/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
+        let snapshotRule = RuleFixtures.claudeCodeJSON
+            .replacingOccurrences(of: "\"~/.claude\"", with: "\"~/.claudebak\"")
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([snapshotRule]),
+            // 词表按**实测名字**写：PRD §4.3 列的 `*-bak` / `*.bak*` 匹配不到实测的
+            // `~/.claudebak`（它结尾是 "bak"，中间没有短横线也没有 ".bak"），
+            // 因此覆盖实测形状要写 `*bak*`。
+            hints: DiscoveryHints(negativeNamePatterns: ["*bak*", "*backup*"]),
+            externalEvidence: ExternalEvidence(applicationNames: ["Claude"]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(candidate.ruleIdentifier, "claude-code")
+        XCTAssertEqual(candidate.confidence, .low, "负向名单里的名字不能是高置信度候选")
+        XCTAssertTrue(candidate.isSuspicious)
+        XCTAssertEqual(candidate.demotions, [.negativeNamePattern("*bak*")])
+        XCTAssertFalse(
+            candidate.signals.structuralFingerprints.isEmpty,
+            "降权不改变它确实命中结构事实这件事"
+        )
+    }
+
+    func test名称关键词只影响顺序不影响入列() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // `.claude` 命中结构、`.codex` 也命中结构；关键词只是让命中关键词的排前面。
+        try fixture.makeFile(".claude/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
+        try fixture.makeFile(
+            ".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: #"{"type":"session_meta","payload":{}}"# + "\n"
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON, RuleFixtures.codexJSON]),
+            // 只给 codex 关键词：谁在前由词表决定，但两个候选都得在列。
+            hints: DiscoveryHints(nameKeywords: ["codex-cli": ["codex"]]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertEqual(
+            result.candidates.map(\.ruleIdentifier),
+            ["codex-cli", "claude-code"],
+            "命中关键词的排前面；没命中关键词的那个**照样在列**"
+        )
+    }
+
     // MARK: - 切片 3：置信度三档（spec #7 §置信度模型）
 
     func test只有结构指纹没有佐证判为中置信度() throws {
