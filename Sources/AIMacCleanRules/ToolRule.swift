@@ -217,7 +217,14 @@ public struct ClassificationEntry: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         pattern = try container.decodePattern(forKey: .pattern)
-        category = try container.decode(DataCategory.self, forKey: .category)
+
+        // 类别是封闭枚举：未知取值要给出指名道姓的可读原因，而不是一个裸的解码错误
+        // （否则「凭空新增类别」会退化成一句看不懂的 type mismatch）。
+        let rawCategory = try container.decode(String.self, forKey: .category)
+        guard let category = DataCategory(rawValue: rawCategory) else {
+            throw RuleFormatError.unknownDataCategory(rawCategory)
+        }
+        self.category = category
         note = try container.decodeIfPresent(String.self, forKey: .note)
     }
 }

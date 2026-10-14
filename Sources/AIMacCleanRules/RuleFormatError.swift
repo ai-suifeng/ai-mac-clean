@@ -21,6 +21,8 @@ public enum RuleFormatError: Error, Equatable, Sendable {
     case missingRequiredField(field: String)
     /// 字段值不合法。
     case invalidFieldValue(field: String, reason: String)
+    /// 声明了封闭枚举以外的数据类别。
+    case unknownDataCategory(String)
     /// 规则文件版本不受支持。
     case unsupportedSchemaVersion(found: Int, supported: Int)
     /// 文件不是合法的 UTF-8 JSON。
@@ -48,6 +50,8 @@ extension RuleFormatError: LocalizedError {
             return "规则文件缺少必填字段：\(field)。"
         case let .invalidFieldValue(field, reason):
             return "规则文件字段 \(field) 的取值不合法：\(reason)"
+        case let .unknownDataCategory(value):
+            return "规则声明了不存在的数据类别 \(value)。类别是封闭枚举（PRD §5.1）：archivableSession、cacheAndLog、protected、uncertain。"
         case let .unsupportedSchemaVersion(found, supported):
             return "规则文件版本 \(found) 不受支持，本版本只支持 \(supported)。"
         case let .malformedJSON(detail):
@@ -66,6 +70,8 @@ extension RuleFormatError: LocalizedError {
             return "对照规则格式文档补齐该字段；未知字段会被忽略，但必填字段不能缺。"
         case .unsupportedSchemaVersion:
             return "请使用与本应用匹配的规则文件版本。"
+        case .unknownDataCategory:
+            return "可用的类别只有 archivableSession（可归档会话）、cacheAndLog（缓存与日志）、protected（受保护）、uncertain（不确定）；规则不能发明新类别。"
         case .unreadableSource:
             return "确认该路径是一个可读的普通文件。"
         case .malformedJSON:

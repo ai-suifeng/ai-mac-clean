@@ -4,7 +4,9 @@ import Foundation
 ///
 /// 公开接口：
 /// - 规则模型与加载器：`ToolRule` / `RuleLoader`（issue #10），格式见 `docs/rule-format.md`。
-/// - 规则集准入的保护单调性校验（issue #11）尚未落地：上层不要假设「已验证的规则集」存在。
+/// - 规则集准入：`RuleSetAdmission.admit(rules:homeDirectory:)`
+///   （issue #11）。给出可用规则集 + 被拒绝的规则及各自原因；保护单调性由它把关，
+///   不依赖上层自觉。
 ///
 /// 上层只应通过本层的公开接口访问规则能力。
 public enum RulesLayer {
