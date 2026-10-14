@@ -444,6 +444,52 @@ final class ToolDiscovererTests: XCTestCase {
         }
     }
 
+    // MARK: - 切片 10：扫描位置的筛选口径与外部佐证采集
+
+    func test主目录扫描根只看隐藏目录() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 规则声明了 `~/notes`，但 PRD §4.2 的主目录扫描位置是「`~` 下的隐藏目录」。
+        try fixture.makeFile("notes/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
+        let rule = RuleFixtures.claudeCodeJSON.replacingOccurrences(of: "\"~/.claude\"", with: "\"~/notes\"")
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([rule]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertTrue(
+            result.candidates.isEmpty,
+            "主目录下不隐藏的目录不在浅扫位置里：\(result.candidates.map(\.toolRootPath))"
+        )
+    }
+
+    func test外部佐证从应用目录与命令搜索路径采集() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        let applications = try fixture.makeDirectory("Applications")
+        try fixture.makeDirectory("Applications/Claude.app")
+        try fixture.makeDirectory("Applications/Codex.app")
+        let commands = try fixture.makeDirectory("bin")
+        try fixture.writeFile("bin/claude", contents: "#!/bin/sh\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: commands + "/claude")
+        // 不可执行的文件不是命令。
+        try fixture.writeFile("bin/codex", contents: "说明文档\n")
+
+        let evidence = ExternalEvidenceCollector.detect(
+            applicationDirectories: [applications],
+            commandSearchPaths: [commands]
+        )
+
+        XCTAssertEqual(evidence.applicationNames, ["Claude", "Codex"])
+        XCTAssertEqual(
+            evidence.commandNames, ["claude"],
+            "PATH 里不可执行的文件不算同名命令（实测 zstd 也不在 /usr/bin）"
+        )
+    }
+
     // MARK: - 切片 9：与确认存储对接、受保护判定按链接真实目标
 
     func test候选的工具根路径直接交给确认存储筛出还要问的候选() throws {

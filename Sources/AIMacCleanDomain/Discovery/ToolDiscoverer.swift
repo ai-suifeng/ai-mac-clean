@@ -80,6 +80,9 @@ public struct ToolDiscoverer {
         // 这里只做一次存在性判断（不递归、不列举），因此仍然属于浅扫；
         // 它也不放宽准入：照样要过结构指纹才能拿到「中」以上。
         for path in declaredToolRootPaths() where seenPaths.insert(path).inserted {
+            // 但它**不能绕过扫描位置的筛选口径**：`~` 下只看隐藏目录（PRD §4.2），
+            // 因此声明在 `~/notes` 这种非隐藏位置的规则不该被这条补漏捡起来。
+            guard !isOutsideScanRootFilter(path, scanRoots: scanRoots) else { continue }
             guard ShallowDirectoryReader.isDirectory(path), !ShallowDirectoryReader.isSymbolicLink(path) else {
                 continue
             }
@@ -97,6 +100,21 @@ public struct ToolDiscoverer {
             candidates: sorted(candidates),
             unreadableDirectories: unreadable
         )
+    }
+
+    /// 这个路径是否被某个扫描根的筛选口径明确排除（如 `~` 下的非隐藏目录）。
+    private func isOutsideScanRootFilter(_ path: String, scanRoots: [ScanRoot]) -> Bool {
+        let components = path.split(separator: "/").map(String.init)
+        guard let name = components.last, components.count >= 2 else { return false }
+        let parent = "/" + components.dropLast().joined(separator: "/")
+
+        return scanRoots.contains { scanRoot in
+            guard scanRoot.path == parent else { return false }
+            switch scanRoot.entryFilter {
+            case .allEntries: return false
+            case .hiddenDirectoriesOnly: return !name.hasPrefix(".")
+            }
+        }
     }
 
     /// 规则集里声明过的全部工具根目录的绝对路径（只认 `role == .toolRoot`）。
