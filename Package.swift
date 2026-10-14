@@ -30,8 +30,14 @@ let package = Package(
             resources: [.copy("BundledRules")]
         ),
 
-        // 工具、候选、置信度、确认记录等领域模型与应用服务接口。内容见 issue #12 / #13。
-        .target(name: "AIMacCleanDomain", dependencies: ["AIMacCleanRules", "AIMacCleanCore"]),
+        // 工具、候选、置信度、确认记录等领域模型与应用服务接口。内容见 issue #12 / #13 / #16。
+        // `Resources/` 里是随版本发布的**默认**关键词 / 负向名单词表：
+        // 用户没写自己的词表时用它，负向名单才不是形同虚设（见 `BuiltInDiscoveryHints`）。
+        .target(
+            name: "AIMacCleanDomain",
+            dependencies: ["AIMacCleanRules", "AIMacCleanCore"],
+            resources: [.process("Resources")]
+        ),
 
         // SwiftUI 视图与视图模型。内容见 issue #16。
         // `Resources/` 里放本地化目录（zh-Hans / en）：界面文案不在视图里硬编码（PRD §9）。

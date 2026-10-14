@@ -89,6 +89,30 @@ public struct DiscoveryHints: Equatable, Sendable {
     }
 }
 
+/// 随版本发布的**默认**词表（issue #16 的生产接线；`docs/discovery-hints.md`）。
+///
+/// 用户可以在应用支持目录里放自己的 `discovery-hints.json` 覆盖它；没有覆盖时用这份。
+/// 它必须存在：没有关键词，「同名 App / PATH 命令」这类外部佐证就无从匹配
+/// （`ExternalEvidence` 按关键词匹配），没有负向名单，旧快照与伴生小工具就会
+/// 以高置信度出现在候选列表里（PRD A1）。
+public enum BuiltInDiscoveryHints {
+
+    /// 资源文件名。
+    public static let fileName = "BundledDiscoveryHints.json"
+
+    /// 内置默认词表的位置。资源缺失时返回 `nil`——发现因此少了排序与降权，
+    /// 但**不**停摆（词表从来不是准入依据）。
+    public static var url: URL? {
+        Bundle.module.url(forResource: "BundledDiscoveryHints", withExtension: "json")
+    }
+
+    /// 读入内置默认词表。读不出来时返回 `nil` 而不是空词表，让调用方能说出来。
+    public static func load() -> DiscoveryHints? {
+        guard let url else { return nil }
+        return try? DiscoveryHints.load(from: url)
+    }
+}
+
 /// 词表文件读不出来 / 格式不对的原因。
 public enum DiscoveryHintsError: Error, Equatable, Sendable {
     case unreadableFile(path: String, detail: String)

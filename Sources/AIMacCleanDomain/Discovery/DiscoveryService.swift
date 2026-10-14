@@ -82,8 +82,11 @@ public struct DiscoveryService: DiscoverySource {
         /// 内置规则目录。`nil` 表示资源没找到（见下方打包说明）。
         public var ruleDirectory: URL?
 
-        /// 关键词 / 负向名单词表文件。文件不存在不算错误（词表是可选配置）。
+        /// 关键词 / 负向名单词表文件（用户覆盖）。文件不存在不算错误（词表是可选配置）。
         public var hintsFileURL: URL?
+
+        /// 随版本发布的默认词表。用户没写自己的词表时用它。
+        public var bundledHintsURL: URL?
 
         /// 采集同名 App 的目录（`/Applications`、`~/Applications`）。
         public var applicationDirectories: [String]
@@ -95,12 +98,14 @@ public struct DiscoveryService: DiscoverySource {
             homeDirectory: String,
             ruleDirectory: URL?,
             hintsFileURL: URL? = nil,
+            bundledHintsURL: URL? = BuiltInDiscoveryHints.url,
             applicationDirectories: [String] = [],
             commandSearchPaths: [String] = []
         ) {
             self.homeDirectory = homeDirectory
             self.ruleDirectory = ruleDirectory
             self.hintsFileURL = hintsFileURL
+            self.bundledHintsURL = bundledHintsURL
             self.applicationDirectories = applicationDirectories
             self.commandSearchPaths = commandSearchPaths
         }
@@ -202,15 +207,22 @@ public struct DiscoveryService: DiscoverySource {
 
     /// 词表读不出来**不算致命**：发现照常进行，只是少了排序与降权，
     /// 但必须说得出来（`docs/discovery-hints.md`：词表错了要看得见）。
+    ///
+    /// 取用顺序：用户词表文件存在就用它（覆盖）；否则用随版本发布的默认词表；
+    /// 两者都没有才退到 `.none`，并说明为什么少了排序与降权。
     private func loadHints(issues: inout [DiscoveryIssue]) -> DiscoveryHints {
-        guard let url = configuration.hintsFileURL else { return .none }
-        guard FileManager.default.fileExists(atPath: url.path) else { return .none }
-        do {
-            return try DiscoveryHints.load(from: url)
-        } catch {
-            issues.append(.hintsUnavailable(reason: error.localizedDescription))
-            return .none
+        if let url = configuration.hintsFileURL, FileManager.default.fileExists(atPath: url.path) {
+            do {
+                return try DiscoveryHints.load(from: url)
+            } catch {
+                issues.append(.hintsUnavailable(reason: error.localizedDescription))
+                return BuiltInDiscoveryHints.load() ?? .none
+            }
         }
+        if let url = configuration.bundledHintsURL, let hints = try? DiscoveryHints.load(from: url) {
+            return hints
+        }
+        return .none
     }
 }
 
