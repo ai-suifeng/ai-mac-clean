@@ -60,6 +60,27 @@ final class RuleSetAdmissionTests: XCTestCase {
         XCTAssertEqual(report.usableRules.map(\.id), ["claude-code", "codex-cli", "cursor", "deepseek-harness"])
     }
 
+    // MARK: 拒绝粒度是单条规则
+
+    func test一批规则里混入一条坏规则时其余规则照常可用() throws {
+        let home = try makeHome()
+        let claude = try decode(RuleFixtures.claudeCodeJSON)
+        let bad = try decode(RuleAdmissionFixtures.codexAuthArchivableJSON)
+        let cursor = try decode(RuleFixtures.cursorJSON)
+
+        let report = RuleSetAdmission.admit(rules: [claude, bad, cursor], homeDirectory: home)
+
+        // 一条坏规则不能让其余已知工具的规则全部失效……
+        XCTAssertEqual(report.usableRules.map(\.id), ["claude-code", "cursor"])
+        XCTAssertNotNil(report.usableRule(id: "claude-code"))
+        // ……也不能被静默忽略：它带着自己的原因单独立在拒绝清单里。
+        XCTAssertEqual(report.rejections.count, 1)
+        XCTAssertEqual(report.rejections.first?.ruleIdentifier, "codex-cli")
+        XCTAssertEqual(report.rejections.first?.reason.isProtectionMonotonicityViolation, true)
+        // 被拒绝的规则整体不出现在可用规则集里（含它自己声明为受保护的那些条目）。
+        XCTAssertNil(report.usableRule(id: "codex-cli"))
+    }
+
     // MARK: 保护单调性（核心断言，直接打 Seam 2）
 
     func test把受保护路径标成缓存不构成降级但要给出提示() throws {
