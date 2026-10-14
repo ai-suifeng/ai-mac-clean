@@ -41,4 +41,26 @@ final class TemporaryDirectoryFixtureTests: XCTestCase {
 
         XCTAssertNotEqual(first.url, second.url)
     }
+
+    func test夹具基址落在真实工具目录下时拒绝创建() throws {
+        // 例如有人把 TMPDIR 指到了 ~/.claude/tmp：夹具宁可失败，也不能在真实目录里建假数据。
+        let forbiddenBase = URL(fileURLWithPath: NSHomeDirectory() + "/.claude/tmp", isDirectory: true)
+
+        XCTAssertThrowsError(try TemporaryDirectoryFixture(named: "amc-fixture", baseDirectory: forbiddenBase)) { error in
+            XCTAssertTrue("\(error)".contains("~/.claude"), "报错要指出命中的禁区，实际：\(error)")
+        }
+    }
+
+    func test夹具落地的每个路径都通过护栏判定() throws {
+        let fixture = try TemporaryDirectoryFixture(named: "amc-fixture-guarded")
+        defer { fixture.remove() }
+
+        let subdirectory = try fixture.makeDirectory("projects/demo")
+        for path in [fixture.url.path, subdirectory.path] {
+            XCTAssertNil(
+                RealToolDirectoryGuard.live.violation(forPath: path),
+                "\(path) 不该落在任何真实 AI 工具数据目录下"
+            )
+        }
+    }
 }
