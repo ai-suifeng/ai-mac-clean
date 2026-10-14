@@ -31,4 +31,83 @@ public struct DiscoveryHints: Equatable, Sendable {
     public func keywords(forRuleIdentifier identifier: String) -> [String] {
         nameKeywords[identifier] ?? []
     }
+
+    /// 词表文件里支持的版本。
+    public static let currentSchemaVersion = 1
+
+    /// 从词表文件读入关键词与负向名单（PRD §4.3「词表放可更新的配置文件」）。
+    ///
+    /// 读不出来时**抛出带中文说明的错误**：词表错了要看得见，不能静默变成空词表——
+    /// 空词表不会让功能出错，只会让负向名单悄悄失效、旧快照悄悄变成高置信度候选。
+    public static func load(from url: URL) throws -> DiscoveryHints {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw DiscoveryHintsError.unreadableFile(path: url.path, detail: "\(error)")
+        }
+
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let root = object as? [String: Any]
+        else {
+            throw DiscoveryHintsError.malformed(path: url.path, reason: "顶层必须是一个 JSON 对象。")
+        }
+
+        if let version = root["schemaVersion"] as? Int {
+            guard version == currentSchemaVersion else {
+                throw DiscoveryHintsError.unsupportedVersion(
+                    path: url.path,
+                    found: version,
+                    supported: currentSchemaVersion
+                )
+            }
+        }
+
+        var keywords: [String: [String]] = [:]
+        if let raw = root["nameKeywords"] {
+            guard let map = raw as? [String: [String]] else {
+                throw DiscoveryHintsError.malformed(
+                    path: url.path,
+                    reason: "nameKeywords 必须是「工具标识 → 关键词数组」的对象。"
+                )
+            }
+            keywords = map
+        }
+
+        var negatives: [String] = []
+        if let raw = root["negativeNamePatterns"] {
+            guard let list = raw as? [String] else {
+                throw DiscoveryHintsError.malformed(
+                    path: url.path,
+                    reason: "negativeNamePatterns 必须是字符串数组。"
+                )
+            }
+            negatives = list.filter { !$0.isEmpty }
+        }
+
+        return DiscoveryHints(nameKeywords: keywords, negativeNamePatterns: negatives)
+    }
+}
+
+/// 词表文件读不出来 / 格式不对的原因。
+public enum DiscoveryHintsError: Error, Equatable, Sendable {
+    case unreadableFile(path: String, detail: String)
+    case malformed(path: String, reason: String)
+    case unsupportedVersion(path: String, found: Int, supported: Int)
+}
+
+extension DiscoveryHintsError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case let .unreadableFile(path, detail):
+            return "关键词 / 负向名单词表无法读取（\(path)）：\(detail)"
+        case let .malformed(path, reason):
+            return "关键词 / 负向名单词表格式不对（\(path)）：\(reason)"
+        case let .unsupportedVersion(path, found, supported):
+            return """
+            关键词 / 负向名单词表的 schemaVersion 是 \(found)（\(path)），\
+            本软件支持的是 \(supported)。
+            """
+        }
+    }
 }

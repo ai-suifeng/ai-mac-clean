@@ -364,6 +364,86 @@ final class ToolDiscovererTests: XCTestCase {
         )
     }
 
+    // MARK: - 切片 8：词表来自可更新的配置文件（PRD §4.3）
+
+    func test词表从配置文件读入而不是写死在代码里() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        let path = try fixture.writeHintsFile(
+            """
+            {
+              "schemaVersion": 1,
+              "nameKeywords": { "claude-code": ["claude"], "codex-cli": ["codex", "openai"] },
+              "negativeNamePatterns": ["*bak*", "*backup*", ".claude-*", ".codexbar", ".codexhost"]
+            }
+            """
+        )
+
+        let hints = try DiscoveryHints.load(from: URL(fileURLWithPath: path))
+
+        XCTAssertEqual(hints.keywords(forRuleIdentifier: "claude-code"), ["claude"])
+        XCTAssertEqual(hints.keywords(forRuleIdentifier: "codex-cli"), ["codex", "openai"])
+        XCTAssertEqual(
+            hints.negativeNamePatterns,
+            ["*bak*", "*backup*", ".claude-*", ".codexbar", ".codexhost"]
+        )
+    }
+
+    func test配置文件里的词表直接参与排序与负向名单() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        let path = try fixture.writeHintsFile(
+            """
+            {
+              "schemaVersion": 1,
+              "nameKeywords": { "codex-cli": ["codex"] },
+              "negativeNamePatterns": ["*bak*"]
+            }
+            """
+        )
+
+        try fixture.makeFile(
+            ".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: ""
+        )
+        try fixture.makeFile(
+            ".claude-bak/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl"
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([
+                RuleFixtures.codexJSON,
+                RuleFixtures.claudeCodeJSON.replacingOccurrences(of: "\"~/.claude\"", with: "\"~/.claude-bak\""),
+            ]),
+            hints: try DiscoveryHints.load(from: URL(fileURLWithPath: path)),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertEqual(
+            result.candidates.map { "\($0.ruleIdentifier ?? "")/\($0.confidence.rawValue)" },
+            ["codex-cli/medium", "claude-code/low"],
+            "配置文件里的关键词只管排序，负向名单把 -bak 压到低"
+        )
+    }
+
+    func test词表文件读不出来时给出可读原因() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        let path = try fixture.writeHintsFile("{ \"schemaVersion\": 99 }")
+
+        XCTAssertThrowsError(try DiscoveryHints.load(from: URL(fileURLWithPath: path))) { error in
+            let description = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            XCTAssertTrue(
+                description.contains("词表") && description.contains("schemaVersion"),
+                "报错要指名是哪个文件、哪个字段：\(description)"
+            )
+        }
+    }
+
     // MARK: - 切片 3：置信度三档（spec #7 §置信度模型）
 
     func test只有结构指纹没有佐证判为中置信度() throws {

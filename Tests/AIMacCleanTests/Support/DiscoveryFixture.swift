@@ -68,8 +68,26 @@ final class DiscoveryFixture {
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
     }
 
+    /// 在夹具根下写一个文件，返回路径。
+    @discardableResult
+    func writeFile(_ relativePath: String, contents: String) throws -> String {
+        let url = home.url.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try contents.write(to: url, atomically: true, encoding: .utf8)
+        return url.path
+    }
+
     /// 一行「像会话转录」的 JSONL 首行：含规则声明的字段特征。
     static let sampleTranscriptLine = #"{"type":"user","message":{"role":"user","content":"hello"}}"# + "\n"
+
+    /// 写一份关键词 / 负向名单配置文件，返回它的路径。
+    @discardableResult
+    func writeHintsFile(_ json: String, named name: String = "discovery-hints.json") throws -> String {
+        try writeFile(name, contents: json)
+    }
 
     /// OpenCode 的规则夹具：藏在 `~/.local/share/opencode` 的非标准位置（User Story 7）。
     ///
