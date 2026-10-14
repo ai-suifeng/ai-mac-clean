@@ -296,4 +296,52 @@ final class BundledToolRuleTests: XCTestCase {
         XCTAssertFalse(naming.stableSessionIdentifier)
         XCTAssertEqual(naming.sessionIDSource, .fileName)
     }
+
+    // MARK: Slice 5：项目路径编码方案（PRD §5.3 / User Story 21）
+
+    func test编码方案逐工具声明且互不混用() throws {
+        let (rules, _) = try loadBundledRules()
+
+        var schemes: [String: ProjectPathEncodingScheme] = [:]
+        for rule in rules {
+            // OpenCode 的项目路径在 `session.directory` **数据库列**里，PRD §5.3 写明
+            // 第一期不做；格式里没有「数据库列」这一档，声明成 inFileField 会是一次
+            // 凭空捏造（引擎会以为该去读文件头）。因此它不声明编码方案，
+            // 取规则格式的保守默认值（docs/rule-format.md）。
+            guard rule.id != "opencode" else {
+                XCTAssertNil(rule.projectPathEncoding)
+                continue
+            }
+
+            let encoding = try XCTUnwrap(rule.projectPathEncoding,
+                                         "规则 \(rule.id) 应当声明项目路径编码方案（PRD §5.3）。")
+            schemes[rule.id] = encoding.scheme
+
+            if encoding.scheme == .inFileField {
+                XCTAssertEqual(encoding.fieldPath, "session_meta.payload.cwd",
+                               "Codex 的项目路径在文件内字段里（PRD §5.4）。")
+            } else {
+                XCTAssertNil(encoding.fieldPath)
+            }
+        }
+
+        // PRD §5.3 的 4 套互不兼容方案里，本阶段覆盖前三种。
+        XCTAssertEqual(schemes, [
+            "claude-code": .singleDash,
+            "codex-cli": .inFileField,
+            "cursor": .singleDash,
+            "deepseek-harness": .doubleDash,
+        ])
+    }
+
+    func testClaude编码方案声明了不可无损逆解这一事实() throws {
+        let (rules, _) = try loadBundledRules()
+        let claude = try XCTUnwrap(rules.first { $0.id == "claude-code" })
+        let note = try XCTUnwrap(claude.projectPathEncoding?.note)
+
+        // PRD §5.3：`/Users/x/.claude` → `-Users-xiaowei--claude`，解码有歧义。
+        // 规则必须把这件事写下来，否则后续实现会去写一个必然出错的逆向解码。
+        XCTAssertTrue(note.contains("不可无损逆解"),
+                      "Claude Code 的编码方案备注应当说明它不可无损逆解：\(note)")
+    }
 }
