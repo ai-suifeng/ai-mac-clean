@@ -20,7 +20,13 @@ let package = Package(
         .target(name: "AIMacCleanCore"),
 
         // 声明式规则模型、规则加载、规则集准入（保护单调性）。内容见 issue #10 / #11。
-        .target(name: "AIMacCleanRules", dependencies: ["AIMacCleanCore"]),
+        // `BundledRules/` 里的规则文件随包分发：新增一个已知工具 = 新增一个规则文件，
+        // 不改代码（issue #15、spec #7 User Story 20）。
+        .target(
+            name: "AIMacCleanRules",
+            dependencies: ["AIMacCleanCore"],
+            resources: [.copy("BundledRules")]
+        ),
 
         // 工具、候选、置信度、确认记录等领域模型与应用服务接口。内容见 issue #12 / #13。
         .target(name: "AIMacCleanDomain", dependencies: ["AIMacCleanRules", "AIMacCleanCore"]),

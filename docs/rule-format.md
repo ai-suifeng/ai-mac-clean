@@ -172,6 +172,50 @@ RuleSetAdmission.warnings(forRule: rule, homeDirectory: home)     // [RuleAdmiss
 - **拒绝粒度是单条规则**：一条坏规则不会让其余已知工具的规则失效，
   但它整体（包括它自己声明为受保护的条目）都不会进入可用规则集。
 
+## 内置规则资源（issue #15）
+
+内置规则是**真实的规则文件**，随包分发，不是源码里的字符串：
+
+```
+Sources/AIMacCleanRules/BundledRules/*.json     ← 规则文件本体
+Sources/AIMacCleanRules/BuiltInRuleResources.swift ← 只给出这个目录在 bundle 里的位置
+```
+
+`Package.swift` 用 `resources: [.copy("BundledRules")]` 把它打进资源 bundle，
+`BuiltInRuleResources.directory` 经 `Bundle.module` 解析。
+**新增一个已知工具 = 在该目录放一个 JSON 文件**，引擎、加载器、准入都不需要改动，
+因此加载器里也永远不会出现工具名分支。
+
+一个目录下的 `*.json` 一条规则（`RuleLoader.loadRules(inDirectory:)` 只读本层）。
+文件名约定 `<id>.json`（`id` 即工具标识），但加载器不依赖这个约定。
+
+### 内置规则一览
+
+| 规则文件 | 工具根 | 项目路径编码 | 自带压缩 | 覆盖深度 |
+|---|---|---|---|---|
+| `claude-code.json` | `~/.claude` | `singleDash` | 否 | 实测校正（PRD §5.4 / §14.5） |
+| `codex-cli.json` | `~/.codex` | `inFileField`（`session_meta.payload.cwd`） | 是（`.zst`） | 实测校正 |
+| `cursor.json` | `~/.cursor` | `singleDash` | 否 | 仅格式可表达（里程碑 6） |
+| `deepseek-harness.json` | `…/deepseek-harness-desktop/harness-home` | `doubleDash` | 是（`.zstd`） | 仅格式可表达 |
+| `opencode.json` | `~/.local/share/opencode` | 不声明 | 否 | 仅发现（User Story 7） |
+
+写这些规则时用掉的几条纪律：
+
+- **版本差异靠「容忍缺失」表达，不靠两套规则**：新版 Claude Code 没有
+  `file-history/`、`todos/`、`statsig/`（文件历史已内联进转录），旧版才有。
+  规则把它们声明成会话级联的关联数据即可——加载与准入都不 stat 磁盘，
+  路径不存在是扫描期「无匹配」（User Story 22/23）。
+- **会话目录形状用 `<uuid>`**：Codex 的 fork 文件名含两个 UUID，写成
+  `rollout-<ISO>-<uuid:parent>_<uuid:fork>.jsonl[.zst]` 才表达得出「一个逻辑会话跨多个文件」。
+- **标签要与内置保护清单一致**：内置清单列为受保护的条目（`shell-snapshots/`、
+  `*.sqlite*`），规则里就声明 `protected`，而不是标成 `cacheAndLog`——后者不拒绝，
+  但会产出一条「它其实仍受保护」的警告，让界面去解释一件本可以避免的事。
+- **`classification` 模式要窄**：不带兜底的 `**`。「写宽了」不会被拒绝，
+  但会让误伤面变大（PRD §8.3：真正的兜底在代码层的内置保护）。
+- **文档没说的就取保守值**：OpenCode 的项目路径在 `session.directory` **数据库列**里，
+  PRD §5.3 写明第一期不做，而格式里没有「数据库列」这一档，因此**不声明编码方案**，
+  而不是硬塞一个 `inFileField` 让引擎去读文件头。
+
 ## 加载器行为
 
 - `RuleLoader.loadRule(at:)` / `loadRule(from:source:)`：单文件，失败抛 `RuleLoadError`。

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "codex-cli",
+  "displayName": "Codex CLI",
+  "roots": [
+    { "path": "~/.codex", "role": "toolRoot" }
+  ],
+  "structuralFingerprint": {
+    "sessionFilePatterns": [
+      "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl",
+      "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl[.zst]",
+      "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>-<uuid:parent>_<uuid:fork>.jsonl[.zst]",
+      "archived_sessions/rollout-<ISO>.jsonl[.zst]",
+      "archived_sessions/rollout-<ISO>-<uuid:parent>_<uuid:fork>.jsonl[.zst]"
+    ],
+    "sessionDirectoryShapes": [
+      "sessions/<date:year>",
+      "archived_sessions"
+    ],
+    "fileHeaderKeys": ["type", "payload"],
+    "headerByteLimit": 8192
+  },
+  "cascade": [],
+  "projectPathEncoding": {
+    "scheme": "inFileField",
+    "fieldPath": "session_meta.payload.cwd",
+    "note": "PRD §5.4：项目路径不编码在路径里，权威来源是文件内字段（另有 `runtime_workspace_roots`）。本阶段只声明字段路径，不读取文件内容（PRD §13 第 3 条）。"
+  },
+  "classification": [
+    { "pattern": "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl", "category": "archivableSession", "note": "明文转录：实测 792 个文件里只有 21 个是明文，但同样要能识别（User Story 24）。" },
+    { "pattern": "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl[.zst]", "category": "archivableSession", "note": "工具自己 zstd 压缩过的转录：实测 771 个 `.zst` 占 3.8G，是主力形态（User Story 24）。本阶段只认扩展名，不解码。" },
+    { "pattern": "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>-<uuid:parent>_<uuid:fork>.jsonl[.zst]", "category": "archivableSession", "note": "fork 会话：文件名里含两个 UUID，一个逻辑会话跨多个文件（User Story 26）。" },
+    { "pattern": "archived_sessions/rollout-<ISO>.jsonl[.zst]", "category": "archivableSession", "note": "已归档会话：扁平存放，没有年月日嵌套（User Story 25）。" },
+    { "pattern": "archived_sessions/rollout-<ISO>-<uuid:parent>_<uuid:fork>.jsonl[.zst]", "category": "archivableSession", "note": "扁平目录里的 fork 会话，同样含两个 UUID。" },
+    { "pattern": "config.toml*", "category": "protected", "note": "配置及其备份（实测 `config.toml` 与 `config.toml.bak`）：内置受保护条目 codex-cli/config。" },
+    { "pattern": "auth.json", "category": "protected", "note": "登录凭证，永不触碰：内置受保护条目 codex-cli/auth。" },
+    { "pattern": "prompts/**", "category": "protected", "note": "自定义提示词。" },
+    { "pattern": "*.sqlite*", "category": "protected", "note": "各状态库：内置受保护条目 codex-cli/sqlite，声明为受保护而不是不确定，避免标签与内置保护不一致。" },
+    { "pattern": ".tmp/**", "category": "cacheAndLog", "note": "实测 879M / 24,849 个陈旧文件，纯垃圾但本阶段按规则不碰，只展示占用。" }
+  ],
+  "selfCompressed": true,
+  "sessionFileNaming": {
+    "stableSessionIdentifier": false,
+    "sessionIDSource": "fileName",
+    "note": "fork 会话文件名含两个 UUID（`rollout-<ISO>-<uuidA>_<uuidB>`），因此文件名不是稳定 ID，一个逻辑会话可能跨多个文件，不能按文件名把会话拆错（PRD §5.4、User Story 26）。"
+  }
+}
