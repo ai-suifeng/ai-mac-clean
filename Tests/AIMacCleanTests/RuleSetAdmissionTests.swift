@@ -60,6 +60,25 @@ final class RuleSetAdmissionTests: XCTestCase {
         XCTAssertEqual(report.usableRules.map(\.id), ["claude-code", "codex-cli", "cursor", "deepseek-harness"])
     }
 
+    // MARK: 用户规则只能抬高保护
+
+    func test用户规则把路径加入受保护集合时被接受且该路径确实受保护() throws {
+        let home = try makeHome()
+        let rule = try decode(RuleAdmissionFixtures.userProtectedAdditionJSON)
+
+        let report = RuleSetAdmission.admit(rules: [rule], homeDirectory: home)
+
+        XCTAssertEqual(report.rejections.map(\.description), [])
+        XCTAssertEqual(report.usableRules.map(\.id), ["user-extension"])
+        XCTAssertEqual(report.category(forRelativePath: "custom-secrets/token.json", ruleID: "user-extension"), .protected)
+        XCTAssertEqual(report.category(forRelativePath: "custom-secrets/nested/deep/token", ruleID: "user-extension"), .protected)
+        // 抬高保护不影响同一条规则里既有的分类。
+        XCTAssertEqual(
+            report.category(forRelativePath: "sessions/2025/10/14/rollout-1.jsonl", ruleID: "user-extension"),
+            .archivableSession
+        )
+    }
+
     // MARK: 拒绝粒度是单条规则
 
     func test一批规则里混入一条坏规则时其余规则照常可用() throws {
@@ -115,6 +134,20 @@ final class RuleSetAdmissionTests: XCTestCase {
 }
 
 private enum RuleAdmissionFixtures {
+
+    /// 用户规则把一条自定义路径**加入**受保护集合（抬高保护永远允许）。
+    static let userProtectedAdditionJSON = """
+{
+  "schemaVersion": 1,
+  "id": "user-extension",
+  "displayName": "用户扩展工具",
+  "roots": [{ "path": "~/.codex", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl", "category": "archivableSession" },
+    { "pattern": "custom-secrets/**", "category": "protected" }
+  ]
+}
+"""
     static let codexAuthArchivableJSON = """
 {
   "schemaVersion": 1,

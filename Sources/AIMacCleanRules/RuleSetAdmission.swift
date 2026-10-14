@@ -201,6 +201,21 @@ public struct RuleAdmissionReport: Equatable, Sendable {
     public func usableRule(id: String) -> ToolRule? {
         usableRules.first { $0.id == id }
     }
+
+    /// 准入后的规则集里，某条相对路径被判成什么类别；没有条目覆盖它时返回 `nil`。
+    ///
+    /// 按声明顺序取第一条命中的分类条目。被拒绝的规则不在 `usableRules` 里，
+    /// 因此**永远不会**通过这条查询给出降级后的类别。
+    ///
+    /// 边界说明：完整的规则匹配语义属于发现器那一侧的工作（issue #12），
+    /// 这里只提供一条够界面展示与验收断言使用的最小查询。
+    public func category(forRelativePath path: String, ruleID: String) -> DataCategory? {
+        guard let rule = usableRule(id: ruleID) else { return nil }
+
+        return rule.classification.first { entry in
+            PatternMatching.matches(entry.pattern, relativePath: path)
+        }?.category
+    }
 }
 
 /// 规则集准入（Seam 2；issue #11）。
