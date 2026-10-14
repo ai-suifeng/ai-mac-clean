@@ -184,6 +184,100 @@ final class DiscoveryPageModelTests: XCTestCase {
         XCTAssertEqual(store.confirmedTools, [])
     }
 
+    // MARK: - 权限提示与加载失败（PRD §4.4、User Stories 14、37）
+
+    func test读不到的位置逐条列出具体路径() throws {
+        let model = try makeModel(
+            candidates: [.fixtureCandidate(confidence: .high, pathSuffix: "claude")],
+            unreadable: [
+                UnreadableDirectory(path: "/Users/x/Library/Application Support", reason: "权限不足"),
+                UnreadableDirectory(path: "/Users/x/.config", reason: "权限不足"),
+            ]
+        )
+
+        XCTAssertEqual(
+            model.state.unreadableDirectories.map(\.path),
+            ["/Users/x/Library/Application Support", "/Users/x/.config"],
+            "权限提示必须点名是哪些位置没扫到，而不是笼统说一句「权限不足」"
+        )
+        let texts = model.permissionNoticeTexts
+        XCTAssertEqual(texts.count, 2)
+        for path in ["/Users/x/Library/Application Support", "/Users/x/.config"] {
+            XCTAssertTrue(texts.contains { $0.contains(path) }, "提示里必须出现具体路径：\(path)")
+        }
+    }
+
+    func test没有读不到的位置时不出现任何权限提示() throws {
+        let model = try makeModel(candidates: [.fixtureCandidate(confidence: .high, pathSuffix: "claude")])
+
+        XCTAssertEqual(model.state.unreadableDirectories, [])
+        XCTAssertEqual(model.permissionNoticeTexts, [])
+    }
+
+    func test权限提示说明不会预先索取完全磁盘访问() throws {
+        let model = try makeModel(
+            candidates: [],
+            unreadable: [UnreadableDirectory(path: "/Users/x/Library/Containers", reason: "权限不足")]
+        )
+
+        XCTAssertEqual(model.permissionNoticeTexts.count, 1)
+        let footnote = model.permissionNoticeFootnote
+        XCTAssertTrue(
+            footnote.contains("完全磁盘访问"),
+            "提示必须写明本软件不会预先索取完全磁盘访问（User Story 37）"
+        )
+    }
+
+    func test运行级问题逐条可读() throws {
+        let model = try makeModel(
+            candidates: [],
+            issues: [.noRulesLoaded, .hintsUnavailable(reason: "文件不存在")]
+        )
+
+        let texts = model.issueTexts
+        XCTAssertEqual(texts.count, 2)
+        for text in texts {
+            XCTAssertFalse(text.isEmpty)
+            XCTAssertFalse(text.contains("noRulesLoaded"), "不该把代码里的枚举名甩给用户看")
+        }
+    }
+
+    // MARK: - 辅助功能读出的文字（User Story 42）
+
+    func test候选的辅助功能读出路径与置信度() throws {
+        let candidate = Candidate.fixtureCandidate(confidence: .high, pathSuffix: "claude")
+        let model = try makeModel(candidates: [candidate])
+
+        let presentation = model.presentation(for: candidate)
+        XCTAssertTrue(presentation.accessibilityLabel.contains("~/.claude"))
+        XCTAssertTrue(presentation.accessibilityLabel.contains(model.confidenceText(for: .high)))
+    }
+
+    func test候选的辅助功能读出信号与疑似标记() throws {
+        let candidate = Candidate.fixtureCandidate(
+            confidence: .low,
+            pathSuffix: "claudebak",
+            signals: ConfirmationSignals(structuralFingerprints: ["projects/<uuid>.jsonl"], nameMatches: ["claude"]),
+            demotions: [.negativeNamePattern("*bak*")]
+        )
+        let model = try makeModel(candidates: [candidate])
+
+        let presentation = model.presentation(for: candidate)
+        XCTAssertTrue(presentation.isSuspicious)
+        XCTAssertTrue(
+            presentation.accessibilityValue.contains(L10n.text(.discoverySuspiciousBadge)),
+            "「疑似」必须被辅助技术读出来，而不是只靠颜色（User Story 42）"
+        )
+        XCTAssertTrue(presentation.accessibilityValue.contains("projects/<uuid>.jsonl"))
+        XCTAssertTrue(presentation.accessibilityValue.contains("*bak*"))
+    }
+
+    func test三档置信度都有独立的文案() throws {
+        let model = try makeModel(candidates: [])
+        let texts = [ConfidenceTier.high, .medium, .low].map { model.confidenceText(for: $0) }
+        XCTAssertEqual(Set(texts).count, 3)
+    }
+
     // MARK: - 辅助
 
     /// 「重启」：从同一个磁盘位置重新读一次确认存储。

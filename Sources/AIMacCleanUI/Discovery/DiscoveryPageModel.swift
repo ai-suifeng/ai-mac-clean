@@ -183,6 +183,47 @@ public final class DiscoveryPageModel: ObservableObject {
         }
     }
 
+    // MARK: - 权限与加载失败（PRD §4.4）
+
+    /// 这次没能扫描的位置，逐条一句，**点名具体路径**。
+    ///
+    /// 没有读不到的目录时返回空数组——界面上因此不会凭空出现任何权限相关的话术，
+    /// 更不会主动引导去申请完全磁盘访问（PRD §4.4：不要无条件索权）。
+    public var permissionNoticeTexts: [String] {
+        state.unreadableDirectories.map {
+            L10n.format(.discoveryPermissionRow, [$0.path, $0.reason])
+        }
+    }
+
+    /// 权限提示的标题（没有读到任何位置时不该显示）。
+    public var permissionNoticeTitle: String? {
+        permissionNoticeTexts.isEmpty ? nil : L10n.text(.discoveryPermissionTitle)
+    }
+
+    /// 权限提示脚注：说明这条提示只在真的遇到授权失败时出现。
+    public var permissionNoticeFootnote: String {
+        L10n.text(.discoveryPermissionFootnote)
+    }
+
+    /// 运行级问题（规则没载入、词表没读到）的可读说明。
+    public var issueTexts: [String] {
+        state.issues.map { issue in
+            switch issue {
+            case .noRulesLoaded:
+                return L10n.text(.discoveryIssueNoRules)
+            case let .hintsUnavailable(reason):
+                return L10n.format(.discoveryIssueHintsUnavailable, [reason])
+            case let .noUsableRules(rejectedCount):
+                return L10n.text(.discoveryIssueNoRules) + "（\(rejectedCount) 条规则未通过准入）"
+            }
+        }
+    }
+
+    /// 最近一次写记录失败的原因（`nil` 表示没有失败）。
+    public var actionFailureText: String? {
+        state.lastActionFailure.map { L10n.format(.discoveryIssueActionFailed, [$0]) }
+    }
+
     // MARK: - 内部
 
     private func candidate(forToolRootPath path: String) -> Candidate? {
