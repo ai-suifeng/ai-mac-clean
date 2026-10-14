@@ -31,10 +31,16 @@ let package = Package(
         // 可执行入口（@main）。
         .executableTarget(name: "AIMacCleanApp", dependencies: ["AIMacCleanUI"]),
 
+        // 测试安全护栏内核（issue #14）：装载时给测试进程套上禁止访问真实 AI 工具
+        // 数据目录的内核沙箱，并提供纯字面路径判定。C 目标——SwiftPM 不支持同一目标内混编。
+        // 只被测试目标依赖，不进产品二进制。
+        .target(name: "AIMacCleanPathGuard"),
+
         // 测试目标与被测模块同包，可访问全部层（issue #8 验收）。
         .testTarget(
             name: "AIMacCleanTests",
             dependencies: [
+                "AIMacCleanPathGuard",
                 "AIMacCleanCore",
                 "AIMacCleanRules",
                 "AIMacCleanDomain",

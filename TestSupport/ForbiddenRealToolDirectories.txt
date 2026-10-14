@@ -1,0 +1,24 @@
+# 真实 AI 工具数据目录禁区清单（issue #14 / spec #7「构造数据的纪律」）
+#
+# 这是**唯一**的清单来源：
+#   - Swift 断言层（Tests/AIMacCleanTests/Support/ForbiddenRealToolDirectory.swift）从本文件读；
+#   - C 拦截器（TestSupport/pathguard.c）在装载时从本文件读（路径由 Scripts/run-tests.sh 传入）。
+# 两侧各读一份文本，不存在代码级重复，因此不会出现「改了 Swift 忘了改 C」的漂移。
+#
+# 语法：每行一条，`~/` 开头的按用户主目录展开（必须先字面展开成绝对路径，禁止在拦截时 stat）。
+#       空行与 `#` 开头的注释忽略；缩进也按注释处理。
+#       只接受 `~/…` 与绝对路径两种写法——清单是安全边界，宁可解析失败也不要默默放宽。
+#       重复条目（含大小写不同、尾斜杠不同）视为错误。
+#
+# 扩充清单：直接往下面加一行即可，不需要改动任何代码。
+#
+# 注意：本文件本身只声明路径字符串。护栏不会去读、去列、去 stat 这些目录本身。
+
+~/.claude
+~/.claudebak
+~/.codex
+~/.cursor
+~/.gemini
+~/.local/share/opencode
+~/Library/Application Support/deepseek-harness-desktop
+~/Library/Application Support/Cursor
