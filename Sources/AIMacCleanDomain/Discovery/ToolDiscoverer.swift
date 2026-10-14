@@ -189,13 +189,17 @@ public struct ToolDiscoverer {
         let evaluated = FingerprintEvaluator.evaluate(fingerprint: fingerprint, toolRootPath: entry.path)
         unreadable.append(contentsOf: evaluated.unreadable)
 
-        let keywords = matchedKeywords(ruleIdentifier: rule.id, of: entry.path)
-        let corroborations = externalEvidence.corroborations(forKeywords: keywords)
+        // 两件不同的事，各用各的依据：
+        // - `nameMatches` 说的是「目录名命中了哪些关键词」——只反映名字，界面如实这么显示；
+        // - 外部佐证问的是「这台机器上装没装这个工具」，依据是**候选所属的规则**，
+        //   不是目录名碰巧命中了哪几个词。
+        let nameMatches = matchedKeywords(ruleIdentifier: rule.id, of: entry.path)
+        let corroborations = externalEvidence.corroborations(forKeywords: corroborationKeywords(for: rule))
             + contentCorroborations(from: evaluated.evidence.contentFeatures)
 
         let signals = ConfirmationSignals(
             structuralFingerprints: evaluated.evidence.fingerprints,
-            nameMatches: keywords,
+            nameMatches: nameMatches,
             externalCorroborations: corroborations
         )
 
@@ -256,7 +260,33 @@ public struct ToolDiscoverer {
         return expanded.count > 1 && expanded.hasSuffix("/") ? String(expanded.dropLast()) : expanded
     }
 
-    /// 名称关键词命中（只用于排序与佐证，不参与准入）。
+    /// 拿去找同名 App / PATH 命令的词：**候选所属规则**声明的关键词，加上它的展示名。
+    ///
+    /// 依据是规则而不是目录名。早先的实现把两件事混成一件：先筛出「目录名命中了哪几个
+    /// 关键词」，再用这些词去找外部佐证。词表是**用户可改的配置**，漏配关键词很正常——
+    /// 一旦漏配，装了 OpenCode 也佐证不了 `~/.local/share/opencode`，「结构指纹 + 外部佐证
+    /// = 高」这条就永远拿不到（User Story 10）。
+    ///
+    /// 展示名也参与匹配，因为它是规则自带的、不依赖用户词表的第二来源：
+    /// `OpenCode` → `opencode`，`DeepSeek Harness` → `deepseek` / `harness`。
+    /// 匹配仍然**忽略大小写与 `.app` 后缀**（见 `ExternalEvidence`），因此不相干的
+    /// App 仍然不构成佐证。
+    private func corroborationKeywords(for rule: ToolRule) -> [String] {
+        var keywords = hints.keywords(forRuleIdentifier: rule.id)
+        let displayName = rule.displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !displayName.isEmpty {
+            keywords.append(displayName)
+            keywords.append(
+                contentsOf: displayName.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                    .map(String.init)
+            )
+        }
+
+        var seen: Set<String> = []
+        return keywords.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+    }
+
+    /// 名称关键词命中（只用于排序，不参与准入，也不决定外部佐证）。
     private func matchedKeywords(ruleIdentifier: String, of path: String) -> [String] {
         let name = path.split(separator: "/").last.map(String.init)?.lowercased() ?? path.lowercased()
         return hints.keywords(forRuleIdentifier: ruleIdentifier).filter { keyword in

@@ -327,6 +327,68 @@ final class ToolDiscovererTests: XCTestCase {
         XCTAssertEqual(candidate.confidence, .high)
     }
 
+    /// 外部佐证按**候选所属的规则**去找，不按目录名命中了哪个关键词去找。
+    ///
+    /// 早期实现把两件事混成一件：先筛出「名字里命中的关键词」，再用这些关键词去找
+    /// 同名 App / PATH 命令。于是词表一旦没给某条规则配关键词——词表是用户可改的配置，
+    /// 漏配很正常——装了 OpenCode 也佐证不了 `~/.local/share/opencode`。
+    /// 规则自己知道它是什么工具，`displayName` 与它声明的关键词才是佐证该拿去找的东西。
+    func test外部佐证按候选所属的规则去找而不是按目录名命中的关键词() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        try fixture.makeFile(
+            ".local/share/opencode/storage/-Users-xiaowei-amc-wt-12/session/message/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.json"
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedBundledRules(),
+            // 词表**没有**给 opencode 配任何关键词（目录名 `opencode` 因此一个都命中不了）。
+            hints: DiscoveryHints(nameKeywords: ["claude-code": ["claude"]]),
+            externalEvidence: ExternalEvidence(applicationNames: ["OpenCode"], commandNames: ["opencode"]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first { $0.ruleIdentifier == "opencode" })
+        XCTAssertEqual(
+            candidate.signals.externalCorroborations,
+            [.application("OpenCode"), .command("opencode")],
+            "装了 OpenCode 就该佐证 ~/.local/share/opencode，与目录名有没有命中关键词无关："
+                + "\(candidate.signals.externalCorroborations)"
+        )
+        XCTAssertTrue(
+            candidate.signals.nameMatches.isEmpty,
+            "名称命中仍然只反映目录名，不该被佐证顺带填上：\(candidate.signals.nameMatches)"
+        )
+        XCTAssertEqual(candidate.confidence, .high, "结构指纹 + 外部佐证 = 高")
+    }
+
+    /// 仍然要防住反向的过度匹配：不相干的 App 不构成佐证。
+    func test与规则无关的应用名不构成外部佐证() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        try fixture.makeFile(
+            ".local/share/opencode/storage/-Users-xiaowei-amc-wt-12/session/message/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.json"
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedBundledRules(),
+            hints: DiscoveryHints(nameKeywords: ["claude-code": ["claude"]]),
+            externalEvidence: ExternalEvidence(applicationNames: ["Xcode", "Notes"]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first { $0.ruleIdentifier == "opencode" })
+        XCTAssertTrue(
+            candidate.signals.externalCorroborations.isEmpty,
+            "不相干的 App 不算佐证：\(candidate.signals.externalCorroborations)"
+        )
+        XCTAssertEqual(candidate.confidence, .medium)
+    }
+
     func test名称关键词只影响顺序不影响入列() throws {
         let fixture = try DiscoveryFixture()
         defer { fixture.home.remove() }
