@@ -41,4 +41,71 @@ final class RuleSetAdmissionTests: XCTestCase {
         XCTAssertEqual(report.rejections.map(\.ruleIdentifier), [])
         XCTAssertEqual(report.usableRules.map(\.id), ["claude-code"])
     }
+
+    func test内置四个工具的实测形状规则都被准入() throws {
+        let home = try makeHome()
+        let rules = try ["Claude Code", "Codex CLI", "Cursor", "DeepSeek Harness"]
+            .map { name -> ToolRule in
+                switch name {
+                case "Claude Code": return try decode(RuleFixtures.claudeCodeJSON)
+                case "Codex CLI": return try decode(RuleFixtures.codexJSON)
+                case "Cursor": return try decode(RuleFixtures.cursorJSON)
+                default: return try decode(RuleFixtures.harnessJSON)
+                }
+            }
+
+        let report = RuleSetAdmission.admit(rules: rules, homeDirectory: home)
+
+        XCTAssertEqual(report.rejections.map(\.description), [])
+        XCTAssertEqual(report.usableRules.map(\.id), ["claude-code", "codex-cli", "cursor", "deepseek-harness"])
+    }
+
+    // MARK: 保护单调性（核心断言，直接打 Seam 2）
+
+    func test把受保护路径标成缓存不构成降级但要给出提示() throws {
+        let home = try makeHome()
+        let claude = try decode(RuleFixtures.claudeCodeJSON)
+
+        let report = RuleSetAdmission.admit(rules: [claude], homeDirectory: home)
+
+        // 缓存与日志同样「只展示、不动」，不授予删除权限，因此不构成降级（PRD §5.1）。
+        XCTAssertEqual(report.usableRules.map(\.id), ["claude-code"])
+        let warning = report.warnings.first { $0.pattern == "shell-snapshots/**" }
+        XCTAssertEqual(warning?.protectedRuleIdentifier, "claude-code/shell-snapshots")
+        XCTAssertEqual(warning?.declaredCategory, .cacheAndLog)
+    }
+
+
+    func test把内置受保护路径改判为可归档的规则被拒绝() throws {
+        let home = try makeHome()
+        let rule = try decode(RuleAdmissionFixtures.codexAuthArchivableJSON)
+
+        let rejection = RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)
+
+        XCTAssertEqual(rejection?.ruleIdentifier, "codex-cli")
+        XCTAssertEqual(rejection?.reason.protectedRuleIdentifier, "codex-cli/auth")
+
+        // 原因要能直接展示给用户，并定位到「哪条规则的哪个字段」。
+        let message = rejection?.description ?? ""
+        XCTAssertTrue(message.contains("classification[2].category"), message)
+        XCTAssertTrue(message.contains("auth.json"), message)
+        XCTAssertTrue(message.contains("不能把它降低"), message)
+    }
+}
+
+private enum RuleAdmissionFixtures {
+    static let codexAuthArchivableJSON = """
+{
+  "schemaVersion": 1,
+  "id": "codex-cli",
+  "displayName": "Codex CLI",
+  "roots": [{ "path": "~/.codex", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl", "category": "archivableSession" },
+    { "pattern": "config.toml", "category": "protected" },
+    { "pattern": "auth.json", "category": "archivableSession" },
+    { "pattern": "prompts/**", "category": "protected" }
+  ]
+}
+"""
 }
