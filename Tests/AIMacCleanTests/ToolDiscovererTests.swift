@@ -444,6 +444,72 @@ final class ToolDiscovererTests: XCTestCase {
         }
     }
 
+    // MARK: - 切片 9：与确认存储对接、受保护判定按链接真实目标
+
+    func test候选的工具根路径直接交给确认存储筛出还要问的候选() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        try fixture.makeFile(".claude/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
+        try fixture.makeFile(
+            ".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: ""
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON, RuleFixtures.codexJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+        let codexRoot = fixture.homePath + "/.codex"
+        let claudeRoot = fixture.homePath + "/.claude"
+
+        let store = JSONConfirmationStore(applicationSupportRoot: fixture.home.url)
+        _ = try store.decide(
+            toolIdentifier: "claude-code",
+            toolRootPath: claudeRoot,
+            decision: .confirmed,
+            signals: result.candidates.first { $0.toolRootPath == claudeRoot }?.signals ?? .none,
+            decidedAt: Date()
+        )
+
+        XCTAssertEqual(
+            store.pendingToolRootPaths(amongCandidates: result.candidateToolRootPaths),
+            [codexRoot],
+            "确认过的候选下次不该再问（PRD §4.1 第 4 步）"
+        )
+    }
+
+    func test候选的受保护判定走内置清单并按链接的真实目标() throws {
+        let realHome = try DiscoveryFixture(named: "real-home")
+        defer { realHome.home.remove() }
+
+        // 主目录本身经过一个符号链接：内置清单判定按真实目标走，因此照样认得出来。
+        try writeTestFile(
+            relativePath: ".claude-credentials-cache/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: DiscoveryFixture.sampleTranscriptLine,
+            in: realHome.home
+        )
+        let linkedHome = realHome.home.url.path + "-link"
+        try FileManager.default.createSymbolicLink(atPath: linkedHome, withDestinationPath: realHome.homePath)
+
+        let credentialRule = RuleFixtures.claudeCodeJSON.replacingOccurrences(
+            of: "\"~/.claude\"",
+            with: "\"~/.claude-credentials-cache\""
+        )
+        let result = ToolDiscoverer(
+            rules: try admittedRules([credentialRule]),
+            homeDirectory: linkedHome
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(
+            candidate.protection?.ruleIdentifier,
+            "credential/credentials",
+            "凭证类名字的目录即便被规则声明为工具根，也必须带出受保护标记"
+        )
+    }
+
     // MARK: - 切片 3：置信度三档（spec #7 §置信度模型）
 
     func test只有结构指纹没有佐证判为中置信度() throws {
