@@ -210,9 +210,23 @@ enum ProtectionMonotonicity {
     }
 
     /// 「不确定」形态的区域化表示（与受保护区域同构，只是判定对象不同）。
-    static func uncertainRegions(forToolRoot rootPath: String) -> [ProtectedRegion] {
-        let normalizedRoot = ProtectedPathMath.normalize(rootPath)
-        return UncertainShapes.shapes.map { shape in
+    ///
+    /// ## 为什么这里没有工具根参数
+    ///
+    /// `UncertainShapes.shapes` 全部是**文件型**形态（`*.sqlite*`、`*.pb`、
+    /// `IndexedDB*`、`leveldb*`、`*.blob*`），而 `ProtectedRegion.contains` 对
+    /// `.fileName` 只比较相对路径的**最后一段**——任何深度都算。
+    ///
+    /// 换句话说，工具根在这条判定里**不改变结论**：它决定的是「判定的作用域上限」，
+    /// 而作用域由调用方施加（`uncertainDowngrade` 只取规则声明的 `toolRoot` 根去展开，
+    /// `displayOnly` 根不参与分类声明的比对）。把工具根传进这里再规范化一遍，
+    /// 只会产出一个没人用的局部变量——那是**看起来像漏了逻辑的假象**，不是真的漏了。
+    ///
+    /// 因此这里刻意**不收工具根**：作用域是调用方的责任，形态展开是纯函数。
+    /// `RuleSetAdmissionTests` 的「不确定形态以工具根为基准而展示位置不参与判定」
+    /// 钉住这条分工。
+    static func uncertainRegions() -> [ProtectedRegion] {
+        UncertainShapes.shapes.map { shape in
             ProtectedRegion(
                 ruleIdentifier: shape.identifier,
                 scopeDescription: "不确定形态 \(shape.pattern.canonicalString)",
@@ -226,9 +240,10 @@ enum ProtectionMonotonicity {
     static func uncertainDowngrade(in rule: ToolRule, homeDirectory: String) -> Finding? {
         guard !rule.classification.isEmpty else { return nil }
 
-        let regions = rule.roots
-            .filter { $0.role == .toolRoot }
-            .flatMap { uncertainRegions(forToolRoot: absolutePath($0.path, homeDirectory: homeDirectory)) }
+        // 作用域上限由规则自己声明：只有 `toolRoot` 是分类声明的基准，
+        // `displayOnly` 根只用于展示占用（PRD §5.4），不参与判定。
+        guard rule.roots.contains(where: { $0.role == .toolRoot }) else { return nil }
+        let regions = uncertainRegions()
 
         for (index, entry) in rule.classification.enumerated()
         where entry.category == .archivableSession {

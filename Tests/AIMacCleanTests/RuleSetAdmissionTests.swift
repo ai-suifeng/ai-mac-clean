@@ -156,6 +156,28 @@ final class RuleSetAdmissionTests: XCTestCase {
         XCTAssertEqual(report.usableRule(id: "user-extension")?.id, "user-extension")
     }
 
+    /// 「不确定」形态全部是**文件型**形态（`*.sqlite*`、`*.pb` …），判定的是
+    /// 「工具根 + 相对路径的最后一段」——因此工具根就是这条判定的基准。
+    ///
+    /// 基准只认规则声明的 `toolRoot`。`displayOnly` 根是「只展示占用」的位置
+    /// （PRD §5.4：`~/Library/Application Support/Cursor` 实测 14G 全是 Electron 内部存储），
+    /// 不参与分类声明的比对，因此不能拿它去判「不确定降级」。
+    func test不确定形态以工具根为基准而展示位置不参与判定() throws {
+        let home = try makeHome()
+        let toolRootRule = try decode(RuleAdmissionFixtures.uncertainDowngradeJSON)
+        let displayOnlyRule = try decode(RuleAdmissionFixtures.displayOnlyUncertainDowngradeJSON)
+
+        XCTAssertEqual(
+            RuleSetAdmission.rejection(forRule: toolRootRule, homeDirectory: home)?.reason.uncertainShapeIdentifier,
+            "uncertain/protobuf",
+            "声明了 toolRoot 的规则要按它自己的工具根判定不确定形态"
+        )
+        XCTAssertNil(
+            RuleSetAdmission.rejection(forRule: displayOnlyRule, homeDirectory: home),
+            "displayOnly 根不是分类声明的基准，不能据此判出不确定降级"
+        )
+    }
+
     // MARK: 用户规则只能抬高保护
 
     func test用户规则把路径加入受保护集合时被接受且该路径确实受保护() throws {
@@ -338,6 +360,19 @@ private enum RuleAdmissionFixtures {
   "roots": [{ "path": "~/.cursor", "role": "toolRoot" }],
   "classification": [
     { "pattern": "*.pb", "category": "uncertain" }
+  ]
+}
+"""
+
+    /// 同样的 `*.pb` 降级，但唯一的根是 `displayOnly`（只展示占用的位置）。
+    static let displayOnlyUncertainDowngradeJSON = """
+{
+  "schemaVersion": 1,
+  "id": "user-extension",
+  "displayName": "用户扩展工具",
+  "roots": [{ "path": "~/Library/Application Support/Cursor", "role": "displayOnly" }],
+  "classification": [
+    { "pattern": "*.pb", "category": "archivableSession" }
   ]
 }
 """

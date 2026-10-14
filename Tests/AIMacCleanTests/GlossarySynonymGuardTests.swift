@@ -79,7 +79,7 @@ final class GlossarySynonymGuardTests: XCTestCase {
             uncertain.description,
             DataCategory.uncertain.displayText,
         ] + ProtectedRegionFactory.regions(forToolRoot: home + "/.codex", homeDirectory: home).map(\.scopeDescription)
-            + ProtectionMonotonicity.uncertainRegions(forToolRoot: home + "/.codex").map(\.scopeDescription)
+            + ProtectionMonotonicity.uncertainRegions().map(\.scopeDescription)
 
         for text in texts {
             for (synonym, reason) in Self.avoidedSynonyms {
