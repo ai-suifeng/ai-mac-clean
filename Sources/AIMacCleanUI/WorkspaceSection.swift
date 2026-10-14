@@ -2,7 +2,8 @@ import Foundation
 
 /// 主窗口侧边栏分栏（PRD §9）。
 ///
-/// 本票（#8）只提供空的分栏占位，各分栏内容由后续票填入。
+/// 本阶段（issue #16）只有「发现与确认」是真实页面，其余分栏是占位，
+/// 且占位文案明确写着「本阶段还没有归档能力」——不给用户任何做不出来的承诺。
 public enum WorkspaceSection: String, CaseIterable, Identifiable, Sendable {
     case overview
     case discovery
@@ -12,31 +13,15 @@ public enum WorkspaceSection: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
-    /// 中文标题。UI 文案以中文落地（spec #7：本地化结构先建立，文案可先单语言）。
+    /// 中文标题。UI 文案以中文落地（spec #7：本地化结构先建立，文案可先单语言），
+    /// 但取文案统一走 `L10n`，英文目录下会给出英文标题（User Story 40）。
     public var title: String {
-        switch self {
-        case .overview: return "概览"
-        case .discovery: return "发现与确认"
-        case .archive: return "归档"
-        case .archived: return "已归档"
-        case .settings: return "设置"
-        }
+        L10n.text(titleKey)
     }
 
     /// 占位阶段该分栏的一句话说明，同时作为辅助功能读出的名称。
     public var accessibilityLabel: String {
-        switch self {
-        case .overview:
-            return "概览：总占用与可归档预计释放空间"
-        case .discovery:
-            return "发现与确认：候选列表与置信度标识"
-        case .archive:
-            return "归档：范围选择、预览与结果汇总"
-        case .archived:
-            return "已归档：浏览、搜索与还原"
-        case .settings:
-            return "设置：归档位置与已确认工具管理"
-        }
+        L10n.text(accessibilityKey)
     }
 
     /// 占位图标名，等后续票接入真实内容时替换。
@@ -52,17 +37,43 @@ public enum WorkspaceSection: String, CaseIterable, Identifiable, Sendable {
 
     /// 该分栏在本票中尚未实现的内容说明，直接展示在空态里。
     public var placeholderMessage: String {
+        L10n.text(placeholderKey)
+    }
+
+    /// 本阶段是不是真实页面。
+    public var isImplemented: Bool {
+        self == .discovery
+    }
+
+    private var titleKey: L10n.Key {
         switch self {
-        case .overview:
-            return "概览将在深扫落地后展示总占用与可归档预计释放空间。"
+        case .overview: return .sidebarSectionOverview
+        case .discovery: return .sidebarSectionDiscovery
+        case .archive: return .sidebarSectionArchive
+        case .archived: return .sidebarSectionArchived
+        case .settings: return .sidebarSectionSettings
+        }
+    }
+
+    private var accessibilityKey: L10n.Key {
+        switch self {
+        case .overview: return .sidebarAccessibilityOverview
+        case .discovery: return .sidebarAccessibilityDiscovery
+        case .archive: return .sidebarAccessibilityArchive
+        case .archived: return .sidebarAccessibilityArchived
+        case .settings: return .sidebarAccessibilitySettings
+        }
+    }
+
+    private var placeholderKey: L10n.Key {
+        switch self {
         case .discovery:
-            return "发现与确认将在结构指纹浅扫落地后展示候选列表。"
-        case .archive:
-            return "归档将在自校验归档包落地后可用。"
-        case .archived:
-            return "已归档将在还原能力落地后可用。"
-        case .settings:
-            return "设置将在归档位置与已确认工具管理落地后可用。"
+            // 发现与确认页已经是真实页面，占位文案不会被展示到。
+            return .discoveryStageNote
+        case .overview: return .placeholderOverview
+        case .archive: return .placeholderArchive
+        case .archived: return .placeholderArchived
+        case .settings: return .placeholderSettings
         }
     }
 }
@@ -70,7 +81,10 @@ public enum WorkspaceSection: String, CaseIterable, Identifiable, Sendable {
 /// 主窗口的分栏选择状态。
 public struct WorkspaceShellModel: Equatable, Sendable {
     /// 启动时选中的分栏。
-    public static let defaultSelection: WorkspaceSection = .overview
+    ///
+    /// 落在「发现与确认」：本阶段只有这一页是真的（issue #16），
+    /// 让用户一开应用就看到一个承诺了还没做的概览页没有意义。
+    public static let defaultSelection: WorkspaceSection = .discovery
 
     /// 当前选中的分栏。
     public var selection: WorkspaceSection

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "nameKeywords": {
+    "claude-code": ["claude", "anthropic"],
+    "codex-cli": ["codex", "openai"],
+    "cursor": ["cursor"],
+    "deepseek-harness": ["deepseek", "harness"],
+    "opencode": ["opencode", "sst"]
+  },
+  "negativeNamePatterns": [
+    "*bak*",
+    "*backup*",
+    "*snapshot*",
+    ".claude-*",
+    ".codexbar",
+    ".codexhost",
+    ".antigravity_cockpit"
+  ]
+}
