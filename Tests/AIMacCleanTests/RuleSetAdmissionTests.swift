@@ -60,6 +60,46 @@ final class RuleSetAdmissionTests: XCTestCase {
         XCTAssertEqual(report.usableRules.map(\.id), ["claude-code", "codex-cli", "cursor", "deepseek-harness"])
     }
 
+    // MARK: 类别封闭：规则不得凭空新增类别，也不得把不确定降级为可归档
+
+    func test规则声明封闭枚举以外的新类别被拒绝() throws {
+        let home = try makeHome()
+        let raw = RawToolRule(source: "user-extension.json",
+                              data: Data(RuleAdmissionFixtures.unknownCategoryJSON.utf8))
+
+        let report = RuleSetAdmission.admit(rawRules: [raw], homeDirectory: home)
+
+        XCTAssertEqual(report.usableRules.map(\.id), [])
+        let rejection = report.rejections.first
+        XCTAssertEqual(rejection?.source, "user-extension.json")
+        guard case let .malformed(format)? = rejection?.reason else {
+            return XCTFail("期望读到类别封闭相关的拒绝原因，实际：\(String(describing: rejection?.reason))")
+        }
+        XCTAssertTrue(rejection?.description.contains("shred") ?? false, rejection?.description ?? "")
+    }
+
+    func test把不确定降级为可归档的规则被拒绝() throws {
+        let home = try makeHome()
+        let rule = try decode(RuleAdmissionFixtures.uncertainDowngradeJSON)
+
+        let rejection = RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)
+
+        XCTAssertEqual(rejection?.reason.uncertainShapeIdentifier, "uncertain/protobuf")
+        let message = rejection?.description ?? ""
+        XCTAssertTrue(message.contains("classification[0].category"), message)
+        XCTAssertTrue(message.contains("*.pb"), message)
+    }
+
+    func test把同一路径声明为不确定时准入通过() throws {
+        let home = try makeHome()
+        let rule = try decode(RuleAdmissionFixtures.uncertainDeclaredJSON)
+
+        let report = RuleSetAdmission.admit(rules: [rule], homeDirectory: home)
+
+        XCTAssertEqual(report.rejections.map(\.description), [])
+        XCTAssertEqual(report.usableRule(id: "user-extension")?.id, "user-extension")
+    }
+
     // MARK: 用户规则只能抬高保护
 
     func test用户规则把路径加入受保护集合时被接受且该路径确实受保护() throws {
@@ -134,6 +174,45 @@ final class RuleSetAdmissionTests: XCTestCase {
 }
 
 private enum RuleAdmissionFixtures {
+
+    /// 凭空发明一个类别。
+    static let unknownCategoryJSON = """
+{
+  "schemaVersion": 1,
+  "id": "user-extension",
+  "displayName": "用户扩展工具",
+  "roots": [{ "path": "~/.cursor", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "assets/**", "category": "shred" }
+  ]
+}
+"""
+
+    /// 把 PRD §5.1 点名的「不确定」数据（`.pb`）降级为可归档。
+    static let uncertainDowngradeJSON = """
+{
+  "schemaVersion": 1,
+  "id": "user-extension",
+  "displayName": "用户扩展工具",
+  "roots": [{ "path": "~/.cursor", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "*.pb", "category": "archivableSession" }
+  ]
+}
+"""
+
+    /// 同一条路径声明为「不确定」：这才是 PRD §5.1 给它的正确处理。
+    static let uncertainDeclaredJSON = """
+{
+  "schemaVersion": 1,
+  "id": "user-extension",
+  "displayName": "用户扩展工具",
+  "roots": [{ "path": "~/.cursor", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "*.pb", "category": "uncertain" }
+  ]
+}
+"""
 
     /// 用户规则把一条自定义路径**加入**受保护集合（抬高保护永远允许）。
     static let userProtectedAdditionJSON = """

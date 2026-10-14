@@ -6,8 +6,8 @@ public enum RuleRejectionReason: Equatable, Sendable {
     case protectionMonotonicity(ProtectionDowngrade)
     /// 规则把「不确定」的数据降级成了可归档（PRD §5.1：不确定只展示、锁定）。
     case uncertainDowngrade(UncertainDowngrade)
-    /// 规则凭空声明了封闭枚举以外的新类别。
-    case unknownCategory(field: String, value: String)
+    /// 规则读不进来：结构不合法（含凭空发明的新类别）。
+    case malformed(RuleFormatError)
 }
 
 extension RuleRejectionReason: CustomStringConvertible {
@@ -17,8 +17,8 @@ extension RuleRejectionReason: CustomStringConvertible {
             return downgrade.description
         case let .uncertainDowngrade(downgrade):
             return downgrade.description
-        case let .unknownCategory(field, value):
-            return "规则字段 \(field) 声明了不存在的类别 \(value)。类别是封闭枚举：archivableSession、cacheAndLog、protected、uncertain。"
+        case let .malformed(format):
+            return format.errorDescription ?? "\(format)"
         }
     }
 }
@@ -28,6 +28,12 @@ extension RuleRejectionReason {
     public var isProtectionMonotonicityViolation: Bool {
         if case .protectionMonotonicity = self { return true }
         return false
+    }
+
+    /// 不确定降级违规时，指向命中的不确定形态标识（如 `uncertain/sqlite`）。
+    public var uncertainShapeIdentifier: String? {
+        guard case let .uncertainDowngrade(downgrade) = self else { return nil }
+        return downgrade.uncertainShapeIdentifier
     }
 
     /// 保护单调性违规时，指向命中的内置受保护条目标识（如 `codex-cli/auth`）。
@@ -107,6 +113,21 @@ extension DataCategory {
         case .protected: return "受保护"
         case .uncertain: return "不确定"
         }
+    }
+}
+
+/// 一份待准入的原始规则：字节 + 来源标识。
+///
+/// 准入既要能吃「已经读进来的规则」，也要能吃「原始文件」：类别封闭这类问题
+/// 只有读到原始字节才看得见（封闭枚举在类型层面挡住了它）。
+public struct RawToolRule: Sendable {
+    /// 规则文件路径，或调用方给的来源标识。
+    public let source: String
+    public let data: Data
+
+    public init(source: String, data: Data) {
+        self.source = source
+        self.data = data
     }
 }
 
@@ -244,28 +265,90 @@ public enum RuleSetAdmission {
         return RuleAdmissionReport(usableRules: usable, rejections: rejections, warnings: warnings)
     }
 
+    /// 从规则文件字节准入：读不进来的规则同样逐条拒绝，其余规则照常可用。
+    public static func admit(rawRules: [RawToolRule], homeDirectory: String) -> RuleAdmissionReport {
+        var decoded: [ToolRule] = []
+        var rejections: [RuleRejection] = []
+
+        for raw in rawRules {
+            do {
+                decoded.append(try RuleLoader.loadRule(from: raw.data, source: raw.source))
+            } catch let error as RuleLoadError {
+                rejections.append(
+                    RuleRejection(
+                        source: raw.source,
+                        ruleIdentifier: "（读不出来的规则）",
+                        ruleDisplayName: raw.source,
+                        reason: malformedReason(error)
+                    )
+                )
+            } catch {
+                rejections.append(
+                    RuleRejection(
+                        source: raw.source,
+                        ruleIdentifier: "（读不出来的规则）",
+                        ruleDisplayName: raw.source,
+                        reason: .malformed(.malformedJSON("\(error)"))
+                    )
+                )
+            }
+        }
+
+        let report = admit(rules: decoded, homeDirectory: homeDirectory)
+        return RuleAdmissionReport(
+            usableRules: report.usableRules,
+            rejections: rejections + report.rejections,
+            warnings: report.warnings
+        )
+    }
+
+    private static func malformedReason(_ error: RuleLoadError) -> RuleRejectionReason {
+        switch error {
+        case let .unreadableFile(_, detail):
+            return .malformed(.unreadableSource(detail))
+        case let .invalidRule(_, reason):
+            return .malformed(reason)
+        }
+    }
+
     /// 单条规则的准入结论：被拒绝时给出原因，通过时返回 `nil`。
     ///
     /// 保护单调性的核心断言就打在这里——不需要规则文件、不需要发现流程，
     /// 直接给出规则与主目录就能判定。
     public static func rejection(forRule rule: ToolRule, homeDirectory: String) -> RuleRejection? {
-        guard let hit = ProtectionMonotonicity.downgrade(in: rule, homeDirectory: homeDirectory) else {
-            return nil
+        if let hit = ProtectionMonotonicity.downgrade(in: rule, homeDirectory: homeDirectory) {
+            return RuleRejection(
+                source: source(of: rule),
+                ruleIdentifier: rule.id,
+                ruleDisplayName: rule.displayName,
+                reason: .protectionMonotonicity(downgrade(from: hit))
+            )
         }
 
-        let downgrade = ProtectionDowngrade(
+        if let hit = ProtectionMonotonicity.uncertainDowngrade(in: rule, homeDirectory: homeDirectory) {
+            let downgrade = UncertainDowngrade(
+                field: hit.field,
+                pattern: hit.entry.pattern.canonicalString,
+                uncertainShapeIdentifier: hit.region.ruleIdentifier
+            )
+            return RuleRejection(
+                source: source(of: rule),
+                ruleIdentifier: rule.id,
+                ruleDisplayName: rule.displayName,
+                reason: .uncertainDowngrade(downgrade)
+            )
+        }
+
+        return nil
+    }
+
+    private static func downgrade(from hit: ProtectionMonotonicity.Finding) -> ProtectionDowngrade {
+        ProtectionDowngrade(
             field: hit.field,
             pattern: hit.entry.pattern.canonicalString,
             declaredCategory: hit.entry.category,
             protectedRuleIdentifier: hit.region.ruleIdentifier,
             protectedScopeDescription: hit.region.scopeDescription
-        )
-
-        return RuleRejection(
-            source: source(of: rule),
-            ruleIdentifier: rule.id,
-            ruleDisplayName: rule.displayName,
-            reason: .protectionMonotonicity(downgrade)
         )
     }
 

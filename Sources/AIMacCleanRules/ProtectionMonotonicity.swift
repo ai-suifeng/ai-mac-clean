@@ -211,6 +211,39 @@ enum ProtectionMonotonicity {
         return found
     }
 
+    /// 「不确定」形态的区域化表示（与受保护区域同构，只是判定对象不同）。
+    static func uncertainRegions(forToolRoot rootPath: String) -> [ProtectedRegion] {
+        let normalizedRoot = ProtectedPathMath.normalize(rootPath)
+        return UncertainShapes.shapes.map { shape in
+            ProtectedRegion(
+                ruleIdentifier: shape.identifier,
+                scopeDescription: "不确定形态 \(shape.pattern.canonicalString)",
+                prefix: [],
+                shape: .fileName(shape.pattern.segments.map(SegmentLanguage.init(segment:)))
+            )
+        }
+    }
+
+    /// 规则里第一处「把不确定降级为可归档」的声明；没有则返回 `nil`。
+    static func uncertainDowngrade(in rule: ToolRule, homeDirectory: String) -> Finding? {
+        guard !rule.classification.isEmpty else { return nil }
+
+        let regions = rule.roots
+            .filter { $0.role == .toolRoot }
+            .flatMap { uncertainRegions(forToolRoot: absolutePath($0.path, homeDirectory: homeDirectory)) }
+
+        for (index, entry) in rule.classification.enumerated()
+        where entry.category == .archivableSession {
+            for region in regions where region.contains(entry.pattern) {
+                return Finding(kind: .mislabelling,
+                               field: "classification[\(index)].category",
+                               entry: entry,
+                               region: region)
+            }
+        }
+        return nil
+    }
+
     /// 规则里第一处削弱内置保护的声明；没有则返回 `nil`。
     static func downgrade(in rule: ToolRule, homeDirectory: String) -> Finding? {
         findings(in: rule, homeDirectory: homeDirectory).first { $0.kind == .demotion }
