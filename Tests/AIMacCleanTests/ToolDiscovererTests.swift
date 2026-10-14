@@ -53,6 +53,137 @@ final class ToolDiscovererTests: XCTestCase {
             "准入依据必须是结构指纹，实际命中：\(candidate.signals.structuralFingerprints)"
         )
     }
+    // MARK: - 切片 3：置信度三档（spec #7 §置信度模型）
+
+    func test只有结构指纹没有佐证判为中置信度() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // Cursor 形态（实测）：`projects/<编码路径>/agent-transcripts/<uuid>/<uuid>.jsonl`。
+        // 这条规则没声明 fileHeaderKeys，因此除了结构指纹没有别的证据可用。
+        try fixture.makeFile(
+            ".cursor/projects/-Users-xiaowei-amc-wt-12/agent-transcripts/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f/1c2d3e4f-5a6b-7c8d-9e0f-1a2b3c4d5e6f.jsonl"
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.cursorJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertEqual(result.candidates.map(\.confidence), [.medium])
+        XCTAssertFalse(try XCTUnwrap(result.candidates.first).isSuspicious)
+    }
+
+    func test结构指纹加同名应用佐证判为高置信度() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        try fixture.makeFile(".claude/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON]),
+            hints: DiscoveryHints(nameKeywords: ["claude-code": ["claude"]]),
+            externalEvidence: ExternalEvidence(applicationNames: ["Claude"]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(candidate.confidence, .high)
+        XCTAssertEqual(candidate.signals.nameMatches, ["claude"])
+        XCTAssertTrue(
+            candidate.signals.externalCorroborations.contains(.application("Claude")),
+            "同名应用必须记为外部佐证，实际：\(candidate.signals.externalCorroborations)"
+        )
+    }
+
+    func test路径命令也作为外部佐证() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        try fixture.makeFile(".claude/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON]),
+            hints: DiscoveryHints(nameKeywords: ["claude-code": ["claude"]]),
+            externalEvidence: ExternalEvidence(commandNames: ["claude", "rg"]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let corroborations = try XCTUnwrap(result.candidates.first).signals.externalCorroborations
+        XCTAssertTrue(
+            corroborations.contains(.command("claude")),
+            "PATH 中的同名命令必须记为外部佐证，实际：\(corroborations)"
+        )
+        XCTAssertFalse(corroborations.contains(.command("rg")), "无关命令不构成佐证")
+    }
+
+    func test会话文件开头的字段特征作为佐证但不超出文件头上限() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 字段特征出现在文件头上限（4096 字节）之后：为了判断而读完整个文件是被明确禁止的，
+        // 因此这个特征**不算**证据，候选停留在「中」。
+        let filler = String(repeating: "x", count: 8_000)
+        try fixture.makeFile(
+            ".claude/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: filler + "\n" + DiscoveryFixture.sampleTranscriptLine
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(candidate.confidence, .medium)
+        XCTAssertTrue(candidate.signals.externalCorroborations.isEmpty)
+    }
+
+    func test只有位置像没有结构证据的候选标为低置信度疑似() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 工具装了但会话记录被清空：位置确实是声明过的工具根，却没有任何结构证据。
+        try fixture.makeFile(".claude/settings.json", contents: "{}")
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(candidate.confidence, .low)
+        XCTAssertTrue(candidate.isSuspicious, "纯名称/位置命中的候选必须标为「疑似」并默认折叠（User Story 4）")
+        XCTAssertEqual(candidate.demotions, [.missingStructuralFingerprint])
+    }
+
+    func test高置信度排在低置信度前面且关键词只影响顺序() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // `.codex` 有结构；`.claude` 只剩配置。
+        try fixture.makeFile(
+            ".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl.zst",
+            contents: ""
+        )
+        try fixture.makeFile(".claude/settings.json", contents: "{}")
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON, RuleFixtures.codexJSON]),
+            hints: DiscoveryHints(
+                nameKeywords: ["claude-code": ["claude"], "codex-cli": ["codex"]],
+                negativeNamePatterns: []
+            ),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertEqual(
+            result.candidates.map { "\($0.ruleIdentifier ?? "")/\($0.confidence.rawValue)" },
+            ["codex-cli/medium", "claude-code/low"]
+        )
+    }
 }
 
 // MARK: - 辅助
