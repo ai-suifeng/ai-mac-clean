@@ -37,7 +37,7 @@
 "discovery.badge.suspicious" = "疑似";
 "discovery.action.confirm" = "确认是 AI 工具";
 "discovery.action.ignore" = "忽略";
-"discovery.action.remove" = "移出";
+"discovery.action.forget" = "移出列表";
 "discovery.action.restore" = "加回";
 "discovery.section.pending" = "待确认候选";
 "discovery.section.confirmed" = "已确认工具";

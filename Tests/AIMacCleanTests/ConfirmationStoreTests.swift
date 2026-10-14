@@ -102,7 +102,27 @@ final class ConfirmationStoreTests: XCTestCase {
         XCTAssertTrue(重启后.ignoredCandidates.isEmpty)
     }
 
-    // MARK: - 移出与加回
+    // MARK: - 移出列表（忘掉记录）与加回
+
+    /// 「忘掉这条记录」是完全可逆的：GLOSSARY 里的「移除」是**唯一不可逆**的动作，
+    /// 且以归档校验通过为前提。API 因此不能叫 `removeTool`——名字会把一条可逆操作
+    /// 说成不可逆的那一步。
+    func test忘掉一条记录的入口叫forget而不是remove() throws {
+        let 根路径 = 工具根(".cursor")
+        let 写入方 = JSONConfirmationStore(applicationSupportRoot: fixture.url)
+        try 写入方.decide(
+            toolIdentifier: "cursor",
+            toolRootPath: 根路径,
+            decision: .confirmed,
+            signals: ConfirmationSignals.none,
+            decidedAt: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+
+        XCTAssertTrue(try 写入方.forgetTool(atToolRootPath: 根路径))
+        XCTAssertNil(写入方.record(forToolRootPath: 根路径))
+        // 没有记录就是「没忘掉过」，两次调用应当如实报告。
+        XCTAssertFalse(try 写入方.forgetTool(atToolRootPath: 根路径))
+    }
 
     func test移出已确认工具后重启读回时不在列表里() throws {
         let 根路径 = 工具根(".cursor")
@@ -116,9 +136,10 @@ final class ConfirmationStoreTests: XCTestCase {
             decidedAt: Date(timeIntervalSince1970: 1_760_000_000)
         )
 
-        try 写入方.removeTool(atToolRootPath: 根路径)
+        try 写入方.forgetTool(atToolRootPath: 根路径)
 
-        // 重启后它既不在已确认列表里，也不再有记录——移出是删掉，不是改写成「忽略」。
+        // 重启后它既不在已确认列表里，也不再有记录——移出列表是让记录不再存在，
+        // 不是改写成「忽略」。
         let 重启后 = JSONConfirmationStore(applicationSupportRoot: fixture.url)
         XCTAssertNil(重启后.record(forToolRootPath: 根路径))
         XCTAssertTrue(重启后.confirmedTools.isEmpty)
@@ -137,7 +158,7 @@ final class ConfirmationStoreTests: XCTestCase {
             signals: ConfirmationSignals.none,
             decidedAt: Date(timeIntervalSince1970: 1_760_000_000)
         )
-        try 写入方.removeTool(atToolRootPath: 根路径)
+        try 写入方.forgetTool(atToolRootPath: 根路径)
         try 写入方.decide(
             toolIdentifier: "cursor",
             toolRootPath: 根路径,
@@ -307,7 +328,7 @@ final class ConfirmationStoreTests: XCTestCase {
                 return XCTFail("期望 storeUnreadable，实际：\(错误)")
             }
         }
-        XCTAssertThrowsError(try store.removeTool(atToolRootPath: 工具根(".codex")))
+        XCTAssertThrowsError(try store.forgetTool(atToolRootPath: 工具根(".codex")))
         XCTAssertEqual(try Data(contentsOf: 文件), 损坏内容, "损坏的存储文件必须原样保留")
     }
 

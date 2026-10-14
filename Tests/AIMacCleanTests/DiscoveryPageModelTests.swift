@@ -139,7 +139,7 @@ final class DiscoveryPageModelTests: XCTestCase {
         let model = try makeModel(candidates: candidates, store: reopenStore())
         XCTAssertEqual(model.state.ignoredCandidates.count, 1)
 
-        model.restoreIgnored(toolRootPath: "/tmp/fake-home/.tool")
+        model.forgetIgnoredCandidate(toolRootPath: "/tmp/fake-home/.tool")
 
         XCTAssertEqual(model.state.ignoredCandidates, [])
         XCTAssertEqual(model.state.pendingGroups.flatMap(\.candidates).map(\.toolRootPath), ["/tmp/fake-home/.tool"])
@@ -153,7 +153,7 @@ final class DiscoveryPageModelTests: XCTestCase {
         let model = try makeModel(candidates: candidates, store: reopenStore())
         XCTAssertEqual(model.state.confirmedTools.count, 1)
 
-        model.removeConfirmed(toolRootPath: "/tmp/fake-home/.claude")
+        model.forgetConfirmedTool(toolRootPath: "/tmp/fake-home/.claude")
 
         XCTAssertEqual(model.state.confirmedTools, [])
         XCTAssertEqual(model.state.pendingGroups.flatMap(\.candidates).map(\.toolRootPath), ["/tmp/fake-home/.claude"])

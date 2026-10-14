@@ -68,7 +68,7 @@ public enum L10n {
         case discoverySuspiciousBadge = "discovery.badge.suspicious"
         case discoveryActionConfirm = "discovery.action.confirm"
         case discoveryActionIgnore = "discovery.action.ignore"
-        case discoveryActionRemove = "discovery.action.remove"
+        case discoveryActionForget = "discovery.action.forget"
         case discoveryActionRestore = "discovery.action.restore"
         case discoverySectionPending = "discovery.section.pending"
         case discoverySectionConfirmed = "discovery.section.confirmed"

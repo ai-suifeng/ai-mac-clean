@@ -34,7 +34,7 @@
 "discovery.badge.suspicious" = "Suspected";
 "discovery.action.confirm" = "Confirm AI tool";
 "discovery.action.ignore" = "Ignore";
-"discovery.action.remove" = "Remove";
+"discovery.action.forget" = "Forget";
 "discovery.action.restore" = "Add back";
 "discovery.section.pending" = "Candidates to confirm";
 "discovery.section.confirmed" = "Confirmed tools";

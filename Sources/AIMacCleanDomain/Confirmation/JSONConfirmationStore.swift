@@ -96,7 +96,7 @@ public final class JSONConfirmationStore: ConfirmationStore {
     }
 
     @discardableResult
-    public func removeTool(atToolRootPath path: String) throws -> Bool {
+    public func forgetTool(atToolRootPath path: String) throws -> Bool {
         if let loadFailure {
             throw loadFailure
         }
