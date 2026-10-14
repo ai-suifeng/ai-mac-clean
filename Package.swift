@@ -6,6 +6,8 @@ import PackageDescription
 
 let package = Package(
     name: "ai-mac-clean",
+    // 本地化资源的基准语言（PRD §9 的界面语言）。任何语言取不到时都回落到它。
+    defaultLocalization: "zh-Hans",
     platforms: [
         .macOS(.v13)
     ],
@@ -31,8 +33,13 @@ let package = Package(
         // 工具、候选、置信度、确认记录等领域模型与应用服务接口。内容见 issue #12 / #13。
         .target(name: "AIMacCleanDomain", dependencies: ["AIMacCleanRules", "AIMacCleanCore"]),
 
-        // SwiftUI 视图。内容见 issue #16。
-        .target(name: "AIMacCleanUI", dependencies: ["AIMacCleanDomain"]),
+        // SwiftUI 视图与视图模型。内容见 issue #16。
+        // `Resources/` 里放本地化目录（zh-Hans / en）：界面文案不在视图里硬编码（PRD §9）。
+        .target(
+            name: "AIMacCleanUI",
+            dependencies: ["AIMacCleanDomain"],
+            resources: [.process("Resources")]
+        ),
 
         // 可执行入口（@main）。
         .executableTarget(name: "AIMacCleanApp", dependencies: ["AIMacCleanUI"]),
