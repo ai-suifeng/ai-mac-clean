@@ -255,4 +255,45 @@ final class BundledToolRuleTests: XCTestCase {
             "todos/<uuid>-agent-<uuid>.json",
         ])
     }
+
+    // MARK: Slice 4：Codex 的三种会话形态（User Story 24 / 25 / 26）
+
+    func testCodex的三种会话形态都被表达() throws {
+        // PRD §14.5 实测：771 个 `.zst`、21 个明文 `.jsonl`；
+        // `archived_sessions/` 扁平存放、没有年月日嵌套；fork 文件名含两个 UUID。
+        let root = try makeToolRoot(".codex", files: [
+            "sessions/2025/10/01/rollout-2025-10-01t09-08-28-3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d.jsonl.zst",
+            "sessions/2025/10/02/rollout-2025-10-02t11-22-33-7c8d9e0f-1a2b-4c3d-8e5f-6a7b8c9d0e1f.jsonl",
+            "archived_sessions/rollout-2025-09-30t08-00-00-9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d.jsonl.zst",
+            "sessions/2025/10/03/rollout-2025-10-03t12-00-00-3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+                + "_9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d.jsonl.zst",
+        ])
+        let (_, report) = try loadBundledRules()
+        let rule = try XCTUnwrap(report.usableRule(id: "codex-cli"))
+        let transcripts = try XCTUnwrap(rule.structuralFingerprint?.sessionFilePatterns)
+
+        for path in try relativeFiles(under: root) {
+            XCTAssertTrue(matches(transcripts, path), "Codex 会话文件模式应覆盖 \(path)")
+            XCTAssertEqual(report.category(forRelativePath: path, ruleID: "codex-cli"),
+                           .archivableSession,
+                           "\(path) 应判为可归档会话。")
+        }
+
+        // 年月日嵌套形态与扁平形态是两种不同的目录形状，不能只声明其中一种。
+        XCTAssertEqual(rule.structuralFingerprint?.sessionDirectoryShapes.map(\.canonicalString),
+                       ["sessions/<date:year>", "archived_sessions"])
+    }
+
+    func testCodex声明自带压缩且文件名不是稳定会话标识() throws {
+        let (_, report) = try loadBundledRules()
+        let rule = try XCTUnwrap(report.usableRule(id: "codex-cli"))
+
+        // `.zst` 是 Codex 自己压的：归档走 store，不再重压缩（ADR-0001）。
+        XCTAssertTrue(rule.selfCompressed)
+
+        // fork 会话文件名含两个 UUID，一个逻辑会话跨多个文件（User Story 26）。
+        let naming = try XCTUnwrap(rule.sessionFileNaming)
+        XCTAssertFalse(naming.stableSessionIdentifier)
+        XCTAssertEqual(naming.sessionIDSource, .fileName)
+    }
 }
