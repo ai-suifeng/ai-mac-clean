@@ -60,6 +60,38 @@ final class RuleSetAdmissionTests: XCTestCase {
         XCTAssertEqual(report.usableRules.map(\.id), ["claude-code", "codex-cli", "cursor", "deepseek-harness"])
     }
 
+    // MARK: 容忍缺失
+
+    func test规则声明的路径在磁盘上不存在时准入通过() throws {
+        let home = try makeHome()
+        // 工具根指向一个从未被创建过的路径：规则声明的路径在磁盘上缺失不是拒绝理由
+        // （spec #7 User Story 22、PRD §5.4）。
+        let missingRoot = fixture.url.path + "/never-created-home/.claude"
+        let ghost = try decode(RuleAdmissionFixtures.ghostToolRuleJSON.replacingOccurrences(
+            of: "<<ROOT>>", with: missingRoot
+        ))
+
+        let report = RuleSetAdmission.admit(rules: [ghost], homeDirectory: home)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missingRoot))
+        XCTAssertEqual(report.rejections.map(\.description), [])
+        XCTAssertEqual(report.usableRules.map(\.id), ["ghost-tool"])
+    }
+
+    func test缺失的工具根下内置保护照样生效() throws {
+        let home = try makeHome()
+        let missingRoot = fixture.url.path + "/never-created-home/.claude"
+        let bad = try decode(RuleAdmissionFixtures.codexSettingsArchivableJSON.replacingOccurrences(
+            of: "<<ROOT>>", with: missingRoot
+        ))
+
+        // 判定完全走路径形状，不依赖磁盘：这个工具根根本不存在，
+        // 但 `settings.json` 仍然撞在内置受保护条目上。
+        let rejection = RuleSetAdmission.rejection(forRule: bad, homeDirectory: home)
+
+        XCTAssertEqual(rejection?.reason.protectedRuleIdentifier, "claude-code/settings")
+    }
+
     // MARK: 类别封闭：规则不得凭空新增类别，也不得把不确定降级为可归档
 
     func test规则声明封闭枚举以外的新类别被拒绝() throws {
@@ -174,6 +206,33 @@ final class RuleSetAdmissionTests: XCTestCase {
 }
 
 private enum RuleAdmissionFixtures {
+
+    /// 工具根指向一个不存在的绝对路径。
+    static let ghostToolRuleJSON = """
+{
+  "schemaVersion": 1,
+  "id": "ghost-tool",
+  "displayName": "尚未安装的工具",
+  "roots": [{ "path": "<<ROOT>>", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl", "category": "archivableSession" },
+    { "pattern": "config.toml", "category": "protected" }
+  ]
+}
+"""
+
+    /// 把 `settings.json` 改判为可归档，工具根用占位符替换。
+    static let codexSettingsArchivableJSON = """
+{
+  "schemaVersion": 1,
+  "id": "ghost-tool",
+  "displayName": "尚未安装的工具",
+  "roots": [{ "path": "<<ROOT>>", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "settings.json", "category": "archivableSession" }
+  ]
+}
+"""
 
     /// 凭空发明一个类别。
     static let unknownCategoryJSON = """
