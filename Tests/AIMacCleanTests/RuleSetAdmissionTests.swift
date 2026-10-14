@@ -60,6 +60,30 @@ final class RuleSetAdmissionTests: XCTestCase {
         XCTAssertEqual(report.usableRules.map(\.id), ["claude-code", "codex-cli", "cursor", "deepseek-harness"])
     }
 
+    // MARK: 符号链接的真实目标
+
+    func test工具根是指向共享技能目录的符号链接时整棵都受保护() throws {
+        // 实测形态（PRD §14.5、issue #5）：`~/.codex/skills` 与 `~/.opencode/skills`
+        // 是指向 `~/.agents/skills` 的符号链接，164 个用户 skill 就在里面。
+        let fakeHome = try ProtectedPathTestSupport.FakeHome.make(named: "skills-link", fixture: fixture)
+        let shared = try ProtectedPathTestSupport.createDirectory(
+            named: ".agents/skills",
+            in: fakeHome.root
+        )
+        try ProtectedPathTestSupport.createDirectory(named: "my-skill", in: shared)
+        try ProtectedPathTestSupport.createSymbolicLink(
+            named: "skills",
+            in: fakeHome.codexRoot,
+            pointingTo: shared
+        )
+
+        let rule = try decode(RuleAdmissionFixtures.skillsSymlinkRootJSON)
+        let rejection = RuleSetAdmission.rejection(forRule: rule, homeDirectory: fakeHome.homeDirectory)
+
+        XCTAssertEqual(rejection?.reason.protectedRuleIdentifier, "home/shared-skills")
+        XCTAssertTrue(rejection?.description.contains("真实目标") ?? false, rejection?.description ?? "")
+    }
+
     // MARK: 容忍缺失
 
     func test规则声明的路径在磁盘上不存在时准入通过() throws {
@@ -206,6 +230,19 @@ final class RuleSetAdmissionTests: XCTestCase {
 }
 
 private enum RuleAdmissionFixtures {
+
+    /// 工具根就是 `~/.codex/skills` 这个符号链接。
+    static let skillsSymlinkRootJSON = """
+{
+  "schemaVersion": 1,
+  "id": "skills-editor",
+  "displayName": "技能编辑工具",
+  "roots": [{ "path": "~/.codex/skills", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "my-skill/notes.jsonl", "category": "archivableSession" }
+  ]
+}
+"""
 
     /// 工具根指向一个不存在的绝对路径。
     static let ghostToolRuleJSON = """
