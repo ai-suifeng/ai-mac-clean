@@ -68,10 +68,136 @@ final class DiscoveryPageModelTests: XCTestCase {
         XCTAssertNil(model.state.lastActionFailure)
     }
 
+    // MARK: - 确认与忽略的落盘（User Stories 15、16、19）
+
+    func test确认后候选不再待确认且进入已确认列表() throws {
+        let signals = ConfirmationSignals(
+            structuralFingerprints: ["projects/<uuid>.jsonl"],
+            nameMatches: ["claude"],
+            externalCorroborations: [.application("Claude")]
+        )
+        let model = try makeModel(candidates: [
+            .fixtureCandidate(confidence: .high, pathSuffix: "claude", signals: signals),
+        ])
+
+        model.confirm(toolRootPath: "/tmp/fake-home/.claude")
+
+        XCTAssertEqual(model.state.pendingGroups, [])
+        XCTAssertEqual(model.state.confirmedTools.map(\.displayPath), ["~/.claude"])
+        XCTAssertNil(model.state.lastActionFailure)
+    }
+
+    func test确认记录保留当时命中的信号() throws {
+        // User Story 19：几个月后还看得懂当初为什么这么判。
+        let signals = ConfirmationSignals(
+            structuralFingerprints: ["projects/<uuid>.jsonl"],
+            nameMatches: ["claude"],
+            externalCorroborations: [.command("claude")]
+        )
+        let model = try makeModel(candidates: [
+            .fixtureCandidate(confidence: .high, pathSuffix: "claude", signals: signals),
+        ])
+
+        model.confirm(toolRootPath: "/tmp/fake-home/.claude")
+
+        let record = try XCTUnwrap(model.state.confirmedTools.first?.record)
+        XCTAssertEqual(record.decision, .confirmed)
+        XCTAssertEqual(record.signals, signals)
+        XCTAssertEqual(record.toolIdentifier, "claude-code")
+        XCTAssertEqual(record.decidedAt, DiscoveryPageFixture.decisionTime)
+    }
+
+    func test重启后不再询问已确认的候选() throws {
+        // 「重启」= 换一个从磁盘重新读盘的存储实例 + 一个新的模型（PRD §4.1 第 4 步）。
+        let candidates: [Candidate] = [.fixtureCandidate(confidence: .high, pathSuffix: "claude")]
+        try makeModel(candidates: candidates).confirm(toolRootPath: "/tmp/fake-home/.claude")
+
+        let afterRestart = try makeModel(candidates: candidates, store: reopenStore())
+
+        XCTAssertEqual(afterRestart.state.pendingGroups, [])
+        XCTAssertEqual(afterRestart.state.confirmedTools.count, 1)
+    }
+
+    func test忽略后不再询问并进入已忽略列表() throws {
+        let candidates: [Candidate] = [.fixtureCandidate(confidence: .medium, pathSuffix: "tool")]
+        let model = try makeModel(candidates: candidates)
+
+        model.ignore(toolRootPath: "/tmp/fake-home/.tool")
+
+        XCTAssertEqual(model.state.pendingGroups, [])
+        XCTAssertEqual(model.state.ignoredCandidates.map(\.displayPath), ["~/.tool"])
+
+        let afterRestart = try makeModel(candidates: candidates, store: reopenStore())
+        XCTAssertEqual(afterRestart.state.pendingGroups, [], "忽略过的候选下次启动不该再问一次")
+    }
+
+    func test加回后候选重新变成待确认() throws {
+        // User Story 18：误点「忽略」之后能改主意。
+        let candidates: [Candidate] = [.fixtureCandidate(confidence: .medium, pathSuffix: "tool")]
+        try makeModel(candidates: candidates).ignore(toolRootPath: "/tmp/fake-home/.tool")
+
+        let model = try makeModel(candidates: candidates, store: reopenStore())
+        XCTAssertEqual(model.state.ignoredCandidates.count, 1)
+
+        model.restoreIgnored(toolRootPath: "/tmp/fake-home/.tool")
+
+        XCTAssertEqual(model.state.ignoredCandidates, [])
+        XCTAssertEqual(model.state.pendingGroups.flatMap(\.candidates).map(\.toolRootPath), ["/tmp/fake-home/.tool"])
+    }
+
+    func test移出后工具离开已确认列表且候选重新待确认() throws {
+        // User Story 17：卸载了工具，它不再出现在列表里。
+        let candidates: [Candidate] = [.fixtureCandidate(confidence: .high, pathSuffix: "claude")]
+        try makeModel(candidates: candidates).confirm(toolRootPath: "/tmp/fake-home/.claude")
+
+        let model = try makeModel(candidates: candidates, store: reopenStore())
+        XCTAssertEqual(model.state.confirmedTools.count, 1)
+
+        model.removeConfirmed(toolRootPath: "/tmp/fake-home/.claude")
+
+        XCTAssertEqual(model.state.confirmedTools, [])
+        XCTAssertEqual(model.state.pendingGroups.flatMap(\.candidates).map(\.toolRootPath), ["/tmp/fake-home/.claude"])
+    }
+
+    func test存储读不出来时拒绝写入并把原因摆在界面上() throws {
+        // 已有记录读不出来时，宁可不写，也不能覆盖用户已有的判断。
+        let corrupted = fixture.applicationSupport
+            .url
+            .appendingPathComponent(JSONConfirmationStore.directoryName, isDirectory: true)
+        try FileManager.default.createDirectory(at: corrupted, withIntermediateDirectories: true)
+        try "{ 这不是 JSON".write(
+            to: corrupted.appendingPathComponent(JSONConfirmationStore.fileName),
+            atomically: true,
+            encoding: .utf8
+        )
+        let store = JSONConfirmationStore(applicationSupportRoot: fixture.applicationSupport.url)
+        let model = try makeModel(
+            candidates: [.fixtureCandidate(confidence: .high, pathSuffix: "claude")],
+            store: store
+        )
+
+        model.confirm(toolRootPath: "/tmp/fake-home/.claude")
+
+        XCTAssertEqual(model.state.confirmedTools, [], "读不出来的存储不能被写坏后当成成功")
+        let failure = try XCTUnwrap(model.state.lastActionFailure)
+        XCTAssertFalse(failure.isEmpty)
+        XCTAssertEqual(store.confirmedTools, [])
+    }
+
     // MARK: - 辅助
 
+    /// 「重启」：从同一个磁盘位置重新读一次确认存储。
+    private func reopenStore() -> JSONConfirmationStore {
+        JSONConfirmationStore(applicationSupportRoot: fixture.applicationSupport.url)
+    }
+
     /// 造一个已经跑过一次发现的模型（等价于视图挂载时的 `load()`）。
-    private func makeModel(candidates: [Candidate], unreadable: [UnreadableDirectory] = [], issues: [DiscoveryIssue] = []) throws -> DiscoveryPageModel {
+    private func makeModel(
+        candidates: [Candidate],
+        unreadable: [UnreadableDirectory] = [],
+        issues: [DiscoveryIssue] = [],
+        store: ConfirmationStore? = nil
+    ) throws -> DiscoveryPageModel {
         let model = DiscoveryPageModel(
             source: StubDiscoverySource(
                 run_: DiscoveryRun(
@@ -79,7 +205,7 @@ final class DiscoveryPageModelTests: XCTestCase {
                     issues: issues
                 )
             ),
-            store: fixture.store,
+            store: store ?? fixture.store,
             settings: fixture.settings,
             homeDirectory: fixture.homePath,
             now: { DiscoveryPageFixture.decisionTime }
