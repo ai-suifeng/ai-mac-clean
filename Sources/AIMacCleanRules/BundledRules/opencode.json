@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "opencode",
+  "displayName": "OpenCode",
+  "roots": [
+    { "path": "~/.local/share/opencode", "role": "toolRoot" }
+  ],
+  "structuralFingerprint": {
+    "sessionDirectoryShapes": [
+      "storage"
+    ]
+  },
+  "cascade": [],
+  "classification": [
+    { "pattern": "*.sqlite*", "category": "uncertain", "note": "OpenCode 以 SQLite 为主，属 PRD §5.1 点名的「不确定」形态：锁定、只展示占用，不归档。" },
+    { "pattern": "storage/**", "category": "uncertain", "note": "私有存储结构，PRD §5.3 注明第一期不做（项目路径在 `session.directory` 列）。本票只做发现（User Story 7），不声明任何可归档形态。" }
+  ],
+  "selfCompressed": false
+}

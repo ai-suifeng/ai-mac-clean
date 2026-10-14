@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "claude-code",
+  "displayName": "Claude Code",
+  "roots": [
+    { "path": "~/.claude", "role": "toolRoot" }
+  ],
+  "structuralFingerprint": {
+    "sessionFilePatterns": [
+      "projects/<encodedPath>/<uuid>.jsonl",
+      "projects/<encodedPath>/agent-<uuid>.jsonl"
+    ],
+    "sessionDirectoryShapes": [
+      "projects/<encodedPath>"
+    ],
+    "projectDirectoryShapes": [
+      "projects/<encodedPath>"
+    ],
+    "fileHeaderKeys": ["type"],
+    "headerByteLimit": 4096
+  },
+  "cascade": [
+    { "kind": "siblingTranscripts", "pattern": "agent-<uuid>.jsonl" },
+    { "kind": "sessionKeyedDirectory", "pattern": "file-history/<uuid>" },
+    { "kind": "sessionKeyedFile", "pattern": "todos/<uuid>-agent-<uuid>.json" }
+  ],
+  "projectPathEncoding": {
+    "scheme": "singleDash",
+    "note": "PRD §5.3：`/`、`.`、空格 → 单 `-`，前导 `/` → 前导 `-`。编码不可无损逆解（`/Users/x/.claude` → `-Users-xiaowei--claude`），因此项目路径只做存在性校验，绝不依赖逆向解码还原。"
+  },
+  "classification": [
+    { "pattern": "projects/<encodedPath>/<uuid>.jsonl", "category": "archivableSession", "note": "主转录（PRD §5.4）。" },
+    { "pattern": "projects/<encodedPath>/agent-<uuid>.jsonl", "category": "archivableSession", "note": "旧版子代理转录，与主转录同级，一个会话跨多个文件，必须一并级联归档。" },
+    { "pattern": "file-history/<uuid>", "category": "archivableSession", "note": "旧版文件历史目录（结构由 `~/.claudebak` 证实）。新版 `~/.claude` 实测不存在，文件历史以 `file-history-snapshot` 内联进转录；路径缺失时静默跳过，不报错（User Story 22/23）。" },
+    { "pattern": "todos/<uuid>-agent-<uuid>.json", "category": "archivableSession", "note": "旧版待办文件，同样只在旧结构存在；缺失时静默跳过（User Story 23）。" },
+    { "pattern": "settings*.json", "category": "protected", "note": "配置：内置受保护条目 claude-code/settings。" },
+    { "pattern": "mcp*.json", "category": "protected", "note": "MCP 设置。" },
+    { "pattern": ".credentials*", "category": "protected", "note": "登录凭证，永不触碰。" },
+    { "pattern": "history.jsonl", "category": "protected", "note": "输入历史：内置受保护条目 claude-code/history。" },
+    { "pattern": "skills/**", "category": "protected", "note": "技能，实测 23M。" },
+    { "pattern": "commands/**", "category": "protected", "note": "命令。" },
+    { "pattern": "agents/**", "category": "protected", "note": "子代理配置。" },
+    { "pattern": "plugins/**", "category": "protected", "note": "插件，实测 247M——`~/.claude` 的 97.5% 是它，界面不得暗示该工具能显著瘦身。" },
+    { "pattern": "shell-snapshots/**", "category": "protected", "note": "文件名格式 `snapshot-zsh-<epochMillis>-<随机6位>.sh` 不含会话 ID，无法按会话级联；内置清单列为受保护，因此声明为受保护而不是缓存（两者都不删，但标签要与内置保护一致）。" },
+    { "pattern": "statsig/**", "category": "protected", "note": "遥测配置；新版实测不存在，缺失时静默跳过。" }
+  ],
+  "selfCompressed": false,
+  "sessionFileNaming": {
+    "stableSessionIdentifier": true,
+    "sessionIDSource": "fileName",
+    "note": "转录文件名就是会话 UUID，是一个逻辑会话的稳定 ID。"
+  }
+}
