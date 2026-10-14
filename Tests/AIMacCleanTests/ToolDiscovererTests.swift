@@ -53,6 +53,61 @@ final class ToolDiscovererTests: XCTestCase {
             "准入依据必须是结构指纹，实际命中：\(candidate.signals.structuralFingerprints)"
         )
     }
+    // MARK: - 切片 4：Codex 实测形状（User Story 24、25、26）
+
+    func testCodex的明文与zst并存且扁平归档目录与fork双UUID都被识别() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 实测：792 个文件里 771 个已是 .zst，仅 21 个是明文 .jsonl——两种并存。
+        try fixture.makeFile(
+            ".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: #"{"type":"session_meta","payload":{"cwd":"/Users/xiaowei/work"}}"# + "\n"
+        )
+        try fixture.makeFile(
+            ".codex/sessions/2026/10/13/rollout-2026-10-13T09-08-28-"
+                + "1c2d3e4f-5a6b-7c8d-9e0f-1a2b3c4d5e6f.jsonl.zst",
+            contents: ""
+        )
+        // 实测：archived_sessions 扁平存放，没有年月日嵌套。
+        try fixture.makeFile(
+            ".codex/archived_sessions/rollout-2026-10-01T09-08-28-"
+                + "2d3e4f5a-6b7c-8d9e-0f1a-2b3c4d5e6f7a.jsonl.zst",
+            contents: ""
+        )
+        // 实测：fork 出来的会话文件名里含两个 UUID。
+        try fixture.makeFile(
+            ".codex/archived_sessions/rollout-2026-10-02T09-08-28-"
+                + "3e4f5a6b-7c8d-9e0f-1a2b-3c4d5e6f7a8b_4f5a6b7c-8d9e-0f1a-2b3c-4d5e6f7a8b9c.jsonl.zst",
+            contents: ""
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.codexJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(candidate.ruleIdentifier, "codex-cli")
+        XCTAssertEqual(
+            Set(candidate.signals.structuralFingerprints),
+            [
+                "sessions/<date:year>",
+                "archived_sessions",
+                "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl",
+                "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl[.zst]",
+                "archived_sessions/rollout-<ISO>.jsonl.zst",
+            ],
+            "明文、.zst、扁平 archived_sessions 与 fork 双 UUID 文件名都要被识别"
+        )
+        XCTAssertEqual(
+            candidate.signals.externalCorroborations,
+            [.contentFeature("会话文件开头含字段 type、payload")],
+            "只有明文会话文件会被读文件头；.zst 本阶段不解压（spec #7 §Out of Scope）"
+        )
+    }
+
     // MARK: - 切片 3：置信度三档（spec #7 §置信度模型）
 
     func test只有结构指纹没有佐证判为中置信度() throws {
