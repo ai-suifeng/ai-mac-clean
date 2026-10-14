@@ -108,6 +108,81 @@ final class ToolDiscovererTests: XCTestCase {
         )
     }
 
+    // MARK: - 切片 5：Cursor / Harness / 非标准位置（User Story 7）
+
+    func testCursor的主转录与同级子代理转录都被识别() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        try fixture.makeFile(
+            ".cursor/projects/-Users-xiaowei-amc-wt-12/agent-transcripts/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f/1c2d3e4f-5a6b-7c8d-9e0f-1a2b3c4d5e6f.jsonl"
+        )
+        try fixture.makeFile(
+            ".cursor/projects/-Users-xiaowei-amc-wt-12/agent-transcripts/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f/subagents/2d3e4f5a-6b7c-8d9e-0f1a-2b3c4d5e6f7a.jsonl"
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.cursorJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(candidate.displayPath, "~/.cursor")
+        XCTAssertTrue(
+            candidate.signals.structuralFingerprints.contains("projects/<encodedPath>/agent-transcripts/<uuid>/<uuid>.jsonl"),
+            "实测形状在第 5 层：\(candidate.signals.structuralFingerprints)"
+        )
+    }
+
+    func testHarness的双横线编码路径与zstd会话被识别() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 实测：`sessions/<双横线编码路径>/session-<uuid>/session.jsonl.zstd`，一个会话一个文件。
+        try fixture.makeFile(
+            "Library/Application Support/deepseek-harness-desktop/harness-home"
+                + "/sessions/--Users-xiaowei-work-amc-wt-12--/session-9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f"
+                + "/session.jsonl.zstd",
+            contents: ""
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.harnessJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(
+            candidate.displayPath,
+            "~/Library/Application Support/deepseek-harness-desktop/harness-home"
+        )
+        XCTAssertTrue(
+            candidate.signals.structuralFingerprints.contains("sessions/<encodedPath>/session-<uuid>/session.jsonl.zstd"),
+            "zstd 会话只按扩展名识别，不解压：\(candidate.signals.structuralFingerprints)"
+        )
+    }
+
+    func test非标准位置的opencode数据也能被发现() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        try fixture.makeFile(
+            ".local/share/opencode/storage/-Users-xiaowei-amc-wt-12/session/message/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.json"
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([DiscoveryFixture.openCodeJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(candidate.displayPath, "~/.local/share/opencode")
+        XCTAssertEqual(candidate.ruleIdentifier, "opencode")
+    }
+
     // MARK: - 切片 3：置信度三档（spec #7 §置信度模型）
 
     func test只有结构指纹没有佐证判为中置信度() throws {

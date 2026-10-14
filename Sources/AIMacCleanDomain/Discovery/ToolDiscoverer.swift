@@ -74,10 +74,42 @@ public struct ToolDiscoverer {
             }
         }
 
+        // 规则声明的工具根本身也看一眼：PRD §4.2 的扫描位置全是「一层」，
+        // 而 DeepSeek Harness 的真实工具根在 `~/Library/Application Support/deepseek-harness-desktop/harness-home`
+        // ——它是那一层目录的**孙子**，只扫一层就永远发现不了它。
+        // 这里只做一次存在性判断（不递归、不列举），因此仍然属于浅扫；
+        // 它也不放宽准入：照样要过结构指纹才能拿到「中」以上。
+        for path in declaredToolRootPaths() where seenPaths.insert(path).inserted {
+            guard ShallowDirectoryReader.isDirectory(path), !ShallowDirectoryReader.isSymbolicLink(path) else {
+                continue
+            }
+            let entry = ShallowDirectoryReader.Entry(
+                name: path.split(separator: "/").last.map(String.init) ?? path,
+                path: path,
+                isDirectory: true,
+                isSymbolicLink: false
+            )
+            guard let candidate = candidate(forDirectory: entry, unreadable: &unreadable) else { continue }
+            candidates.append(candidate)
+        }
+
         return DiscoveryResult(
             candidates: sorted(candidates),
             unreadableDirectories: unreadable
         )
+    }
+
+    /// 规则集里声明过的全部工具根目录的绝对路径（只认 `role == .toolRoot`）。
+    private func declaredToolRootPaths() -> [String] {
+        var seen: Set<String> = []
+        var paths: [String] = []
+        for rule in rules {
+            for root in rule.roots where root.role == .toolRoot {
+                let path = resolvedRootPath(root.path)
+                if seen.insert(path).inserted { paths.append(path) }
+            }
+        }
+        return paths
     }
 
     // MARK: - 候选判定

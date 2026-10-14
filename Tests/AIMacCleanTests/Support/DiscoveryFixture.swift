@@ -70,4 +70,29 @@ final class DiscoveryFixture {
 
     /// 一行「像会话转录」的 JSONL 首行：含规则声明的字段特征。
     static let sampleTranscriptLine = #"{"type":"user","message":{"role":"user","content":"hello"}}"# + "\n"
+
+    /// OpenCode 的规则夹具：藏在 `~/.local/share/opencode` 的非标准位置（User Story 7）。
+    ///
+    /// PRD §5.4 没有给出 OpenCode 的实测目录形状（它的格式是私有协议与 SQLite，
+    /// 第一期只做发现与占用展示）。因此这里只声明一条保守的会话文件路径模式：
+    /// 本切片要证明的是**位置能被发现**，不是断言某个具体内部结构。
+    static let openCodeJSON = """
+    {
+      "schemaVersion": 1,
+      "id": "opencode",
+      "displayName": "OpenCode",
+      "roots": [
+        { "path": "~/.local/share/opencode", "role": "toolRoot" }
+      ],
+      "structuralFingerprint": {
+        "sessionFilePatterns": ["storage/<encodedPath>/session/message/<uuid>.json"],
+        "projectDirectoryShapes": ["storage/<encodedPath>"]
+      },
+      "classification": [
+        { "pattern": "storage/<encodedPath>/session/message/<uuid>.json", "category": "archivableSession" },
+        { "pattern": "storage/**", "category": "uncertain" }
+      ],
+      "selfCompressed": false
+    }
+    """
 }
