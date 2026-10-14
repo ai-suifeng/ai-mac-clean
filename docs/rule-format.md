@@ -153,7 +153,7 @@ RuleSetAdmission.warnings(forRule: rule, homeDirectory: home)     // [RuleAdmiss
 3. **类别封闭**（`malformed`）：凭空发明新类别，或规则读不进来。
 
 判为 `cacheAndLog` / `uncertain` 落在受保护区域里**不拒绝**——PRD §5.1 的处理列写明这两类
-同样「只展示大小，不动」，不授予删除权限；但会产出 `warnings`，让界面如实说明
+同样「只展示大小，不动」，不授予归档与移除的许可；但会产出 `warnings`，让界面如实说明
 「它其实仍受保护」，而不是让用户以为规则生效了。
 
 ### 写规则时的几条纪律

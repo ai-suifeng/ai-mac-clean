@@ -240,7 +240,7 @@ public enum BuiltInProtectedPaths {
     /// 测试才能在临时目录上跑，本层也不会在隐式依赖真实用户主目录的情况下做安全判定。
     ///
     /// 判定**不做任何缓存**：宁可每次重算，也不因缓存过期漏掉一个刚出现的符号链接——
-    /// 漏判的后果是删除凭证，而多算一次的开销只是多几次目录列举。
+    /// 漏判的后果是动了凭证，而多算一次的开销只是多几次目录列举。
     public static func protection(
         forPath path: String,
         underToolRoot toolRoot: String,

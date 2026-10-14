@@ -157,7 +157,7 @@ extension RuleRejection: CustomStringConvertible {
 /// 一条不构成降级、但与内置保护不一致的分类声明。
 ///
 /// 例：规则把 `shell-snapshots/**` 标成 `cacheAndLog`，而内置清单把它列为受保护。
-/// 两个类别都不允许删除，所以规则照常可用；但界面应当如实说明「它其实仍受保护」，
+/// 两个类别都不动数据，所以规则照常可用；但界面应当如实说明「它其实仍受保护」，
 /// 而不是让用户以为「这是缓存，可以随手清掉」。
 public struct RuleAdmissionWarning: Equatable, Sendable {
     public let ruleIdentifier: String
@@ -191,7 +191,7 @@ extension RuleAdmissionWarning: CustomStringConvertible {
         """
         规则「\(ruleDisplayName)」（\(ruleIdentifier)）的字段 \(field) 把路径 \(pattern) 标为 \
         \(declaredCategory.rawValue)（\(declaredCategory.displayText)），而内置受保护条目 \
-        \(protectedRuleIdentifier) 把它列为受保护。该类别同样不会删除任何数据，因此规则可用，\
+        \(protectedRuleIdentifier) 把它列为受保护。该类别同样不会动任何数据，因此规则可用，\
         但这条路径实际仍然受保护。
         """
     }
