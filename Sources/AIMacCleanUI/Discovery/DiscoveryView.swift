@@ -114,9 +114,9 @@ public struct DiscoveryView: View {
                     ToolRowView(
                         title: row.displayPath,
                         subtitle: row.record.toolIdentifier,
-                        actionTitle: L10n.text(.discoveryActionRemove)
+                        actionTitle: L10n.text(.discoveryActionForget)
                     ) {
-                        model.removeConfirmed(toolRootPath: row.record.toolRootPath)
+                        model.forgetConfirmedTool(toolRootPath: row.record.toolRootPath)
                     }
                 }
             }
@@ -136,7 +136,7 @@ public struct DiscoveryView: View {
                         subtitle: row.record.toolIdentifier,
                         actionTitle: L10n.text(.discoveryActionRestore)
                     ) {
-                        model.restoreIgnored(toolRootPath: row.record.toolRootPath)
+                        model.forgetIgnoredCandidate(toolRootPath: row.record.toolRootPath)
                     }
                 }
             }

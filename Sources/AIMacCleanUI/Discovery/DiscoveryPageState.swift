@@ -11,7 +11,7 @@ public struct DiscoveryPageState: Equatable {
     /// 待确认候选，按置信度高 → 中 → 低分组；空分档不出现。
     public var pendingGroups: [CandidateGroup]
 
-    /// 已确认的工具（GLOSSARY「工具」），带「移出」入口。
+    /// 已确认的工具（GLOSSARY「工具」），带「移出列表」入口。
     public var confirmedTools: [ConfirmedToolRow]
 
     /// 已忽略的候选，带「加回」入口。

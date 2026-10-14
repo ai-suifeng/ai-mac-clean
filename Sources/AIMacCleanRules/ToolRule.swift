@@ -192,7 +192,7 @@ public enum DataCategory: String, Codable, CaseIterable, Equatable, Sendable {
     case cacheAndLog
     /// 受保护：配置、登录凭证、技能、命令。永不触碰。
     case protected
-    /// 不确定：无法安全分类的数据。锁定，仅展示占用。
+    /// 不确定：无法安全分类的数据。仅展示占用，不归档。
     case uncertain
 }
 

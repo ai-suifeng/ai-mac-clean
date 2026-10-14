@@ -21,10 +21,15 @@ public struct ExternalEvidence: Equatable, Sendable {
     /// 没有任何外部佐证。
     public static let none = ExternalEvidence()
 
-    /// 规则命中后，为它找外部佐证。
+    /// 为一条候选的**规则**找外部佐证。
     ///
     /// 匹配忽略大小写与 `.app` 后缀：`claude-code` 的关键词 `claude` 在
     /// `/Applications/Claude.app` 与 PATH 里的 `claude` 上都算数。
+    ///
+    /// 传入的词来自**规则**（它声明的关键词 + 它的展示名），不是「目录名碰巧命中的
+    /// 关键词」——词表是用户可改的配置，按目录名筛过一遍再拿去找 App，
+    /// 等于让「用户词表配得全不全」决定这条候选能不能到「高置信度」（User Story 10）。
+    /// 本类型只做纯匹配，采集端仍然完全由调用方注入。
     public func corroborations(forKeywords keywords: [String]) -> [ExternalCorroboration] {
         var result: [ExternalCorroboration] = []
         for keyword in keywords {

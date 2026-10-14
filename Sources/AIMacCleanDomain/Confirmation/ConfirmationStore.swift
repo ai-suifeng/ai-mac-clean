@@ -29,13 +29,18 @@ public protocol ConfirmationStore: AnyObject {
         decidedAt: Date
     ) throws -> ConfirmationRecord
 
-    /// 把某个工具根目录**移出**列表（User Story 17：「我卸载了工具后它不再出现在概览里」）。
+    /// 把某个工具根目录的**记录忘掉**，也就是让它重新变回候选（User Story 17：
+    /// 「我卸载了工具后它不再出现在概览里」）。
     ///
-    /// 记录被删除而不是改写成「忽略」：忽略的含义是「这不是 AI 工具」，
+    /// 叫「忘掉」而不是「移除」：GLOSSARY 里的「移除」是**唯一不可逆**的动作，
+    /// 且以归档校验通过为前提。这里只是抹掉一条本软件自己的判断记录，
+    /// 完全可逆——重新确认一次就回来了。叫 remove 会把两件事说混。
+    ///
+    /// 记录被抹掉而不是改写成「忽略」：忽略的含义是「这不是 AI 工具」，
     /// 用它来表达「我卸载了」会往忽略列表里塞一条错误的断言。
     /// - Returns: 之前是否存在该记录。
     @discardableResult
-    func removeTool(atToolRootPath: String) throws -> Bool
+    func forgetTool(atToolRootPath: String) throws -> Bool
 
     /// 从候选列表中筛出**尚无记录**的工具根目录，即还需要问用户的那些
     /// （PRD §4.1 第 4 步：确认与忽略的结果都要保存，下次启动不重复询问）。

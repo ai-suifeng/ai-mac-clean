@@ -157,15 +157,6 @@ enum ProtectionMonotonicity {
 
     /// 一处与内置受保护区域冲突的分类声明。
     struct Finding {
-        /// 冲突的性质。
-        enum Kind {
-            /// 把受保护路径放进了**允许删除**的类别——保护单调性违规，整条规则被拒绝。
-            case demotion
-            /// 类别同样「只展示、不动」，不构成降级，但标签与内置保护不一致，给出提示。
-            case mislabelling
-        }
-
-        let kind: Kind
         /// 规则里出问题的字段，如 `classification[3].category`。
         let field: String
         let entry: ClassificationEntry
@@ -174,15 +165,23 @@ enum ProtectionMonotonicity {
 
     /// 规则里全部与内置受保护区域冲突的分类声明。
     ///
-    /// ## 什么算降级
+    /// ## 什么算冲突
     ///
-    /// PRD §5.1 的「处理」列写得很清楚：**只有「可归档会话」允许归档与移除**，
-    /// 缓存与日志、不确定、受保护都只是「只展示大小，不动」。因此保护单调性的可判定
-    /// 含义是——**内置受保护路径不能落进允许删除的类别**：
+    /// spec #7 §规则集准入写得很直接：**内置受保护路径，用户规则只能声明为「受保护」，
+    /// 不能改判成别的类别**。因此判定就是一条：
     ///
-    /// - 判为 `archivableSession` → 违规，**拒绝整条规则**（验收 A16、User Story 29）；
-    /// - 判为 `cacheAndLog` / `uncertain` → 仍然不删不碰，但标签与内置保护不一致，
-    ///   给出可读提示，让界面能如实说明「它其实仍受保护」，而不是让用户误以为规则生效。
+    /// - 声明为 `protected` → 与内置清单一致，放行（受保护是最高档）；
+    /// - 声明为 `archivableSession`（可归档会话） → 违规，整条规则被拒绝；
+    /// - 声明为 `cacheAndLog` / `uncertain` → **同样被拒绝**。
+    ///
+    /// 最后一条最容易被漏掉：这两个类别确实也不动数据，但它们各自带着一句**用户会读到的
+    /// 承诺**——「这是缓存，可以清」「这个认不出来，只能放着」。内置清单说这条路径受保护，
+    /// 规则却给出另一句承诺，界面就会同时显示两个互相矛盾的标签。因此正确写法只有一个：
+    /// 把它声明成 `protected`（`Sources/AIMacCleanRules/BundledRules/*.json` 全部照此办理）。
+    ///
+    /// 这里说的始终是**类别层面的许可**，而且许可覆盖的是归档与移除**两步**：
+    /// 移除原文件以自校验归档包的校验通过为前提（GLOSSARY「移除」、ADR-0002），
+    /// 因此本判定既不把两步合成一步，也不把「可归档」读成「可移除」。
     ///
     /// 遍历顺序：先按规则里的声明顺序，再按内置清单顺序，因此报出来的总是**第一条**
     /// 出问题的声明，且指向具体的内置条目。
@@ -193,13 +192,12 @@ enum ProtectionMonotonicity {
         var found: [Finding] = []
 
         for (index, entry) in rule.classification.enumerated() {
-            // 受保护是最高档：声明「受保护」只会抬高保护，不构成降级。
+            // 受保护是最高档：声明「受保护」与内置清单一致，只抬高不降低。
             guard entry.category != .protected else { continue }
 
             for region in regions where region.contains(entry.pattern) {
                 found.append(
                     Finding(
-                        kind: entry.category == .archivableSession ? .demotion : .mislabelling,
                         field: "classification[\(index)].category",
                         entry: entry,
                         region: region
@@ -212,9 +210,23 @@ enum ProtectionMonotonicity {
     }
 
     /// 「不确定」形态的区域化表示（与受保护区域同构，只是判定对象不同）。
-    static func uncertainRegions(forToolRoot rootPath: String) -> [ProtectedRegion] {
-        let normalizedRoot = ProtectedPathMath.normalize(rootPath)
-        return UncertainShapes.shapes.map { shape in
+    ///
+    /// ## 为什么这里没有工具根参数
+    ///
+    /// `UncertainShapes.shapes` 全部是**文件型**形态（`*.sqlite*`、`*.pb`、
+    /// `IndexedDB*`、`leveldb*`、`*.blob*`），而 `ProtectedRegion.contains` 对
+    /// `.fileName` 只比较相对路径的**最后一段**——任何深度都算。
+    ///
+    /// 换句话说，工具根在这条判定里**不改变结论**：它决定的是「判定的作用域上限」，
+    /// 而作用域由调用方施加（`uncertainDowngrade` 只取规则声明的 `toolRoot` 根去展开，
+    /// `displayOnly` 根不参与分类声明的比对）。把工具根传进这里再规范化一遍，
+    /// 只会产出一个没人用的局部变量——那是**看起来像漏了逻辑的假象**，不是真的漏了。
+    ///
+    /// 因此这里刻意**不收工具根**：作用域是调用方的责任，形态展开是纯函数。
+    /// `RuleSetAdmissionTests` 的「不确定形态以工具根为基准而展示位置不参与判定」
+    /// 钉住这条分工。
+    static func uncertainRegions() -> [ProtectedRegion] {
+        UncertainShapes.shapes.map { shape in
             ProtectedRegion(
                 ruleIdentifier: shape.identifier,
                 scopeDescription: "不确定形态 \(shape.pattern.canonicalString)",
@@ -228,15 +240,15 @@ enum ProtectionMonotonicity {
     static func uncertainDowngrade(in rule: ToolRule, homeDirectory: String) -> Finding? {
         guard !rule.classification.isEmpty else { return nil }
 
-        let regions = rule.roots
-            .filter { $0.role == .toolRoot }
-            .flatMap { uncertainRegions(forToolRoot: absolutePath($0.path, homeDirectory: homeDirectory)) }
+        // 作用域上限由规则自己声明：只有 `toolRoot` 是分类声明的基准，
+        // `displayOnly` 根只用于展示占用（PRD §5.4），不参与判定。
+        guard rule.roots.contains(where: { $0.role == .toolRoot }) else { return nil }
+        let regions = uncertainRegions()
 
         for (index, entry) in rule.classification.enumerated()
         where entry.category == .archivableSession {
             for region in regions where region.contains(entry.pattern) {
-                return Finding(kind: .mislabelling,
-                               field: "classification[\(index)].category",
+                return Finding(field: "classification[\(index)].category",
                                entry: entry,
                                region: region)
             }
@@ -244,9 +256,9 @@ enum ProtectionMonotonicity {
         return nil
     }
 
-    /// 规则里第一处削弱内置保护的声明；没有则返回 `nil`。
-    static func downgrade(in rule: ToolRule, homeDirectory: String) -> Finding? {
-        findings(in: rule, homeDirectory: homeDirectory).first { $0.kind == .demotion }
+    /// 规则里第一处与内置受保护区域冲突的声明；没有则返回 `nil`。
+    static func reclassification(in rule: ToolRule, homeDirectory: String) -> Finding? {
+        findings(in: rule, homeDirectory: homeDirectory).first
     }
 
     /// 规则声明的每个工具根各自展开出的受保护区域。

@@ -41,4 +41,20 @@ final class LocalizationCatalogTests: XCTestCase {
         XCTAssertFalse(text.isEmpty)
         XCTAssertNotEqual(text, L10n.Key.discoveryPageTitle.rawValue)
     }
+
+    /// 「忘掉这条记录」是可逆的，GLOSSARY 里的「移除」是唯一的不可逆动作。
+    /// 因此文案与 key 都不能沿用 remove / 移除。
+    func test忘记记录的动作不叫移除而叫移出列表() {
+        let zh = L10n.text(.discoveryActionForget, language: .simplifiedChinese)
+        let en = L10n.text(.discoveryActionForget, language: .english)
+
+        XCTAssertEqual(zh, "移出列表")
+        XCTAssertEqual(en, "Forget")
+        for key in L10n.catalogKeys(language: .simplifiedChinese) + L10n.catalogKeys(language: .english) {
+            XCTAssertNotEqual(
+                key, "discovery.action.remove",
+                "旧的 discovery.action.remove 必须整个消失，不能只改文案留着 key"
+            )
+        }
+    }
 }

@@ -156,6 +156,28 @@ final class RuleSetAdmissionTests: XCTestCase {
         XCTAssertEqual(report.usableRule(id: "user-extension")?.id, "user-extension")
     }
 
+    /// 「不确定」形态全部是**文件型**形态（`*.sqlite*`、`*.pb` …），判定的是
+    /// 「工具根 + 相对路径的最后一段」——因此工具根就是这条判定的基准。
+    ///
+    /// 基准只认规则声明的 `toolRoot`。`displayOnly` 根是「只展示占用」的位置
+    /// （PRD §5.4：`~/Library/Application Support/Cursor` 实测 14G 全是 Electron 内部存储），
+    /// 不参与分类声明的比对，因此不能拿它去判「不确定降级」。
+    func test不确定形态以工具根为基准而展示位置不参与判定() throws {
+        let home = try makeHome()
+        let toolRootRule = try decode(RuleAdmissionFixtures.uncertainDowngradeJSON)
+        let displayOnlyRule = try decode(RuleAdmissionFixtures.displayOnlyUncertainDowngradeJSON)
+
+        XCTAssertEqual(
+            RuleSetAdmission.rejection(forRule: toolRootRule, homeDirectory: home)?.reason.uncertainShapeIdentifier,
+            "uncertain/protobuf",
+            "声明了 toolRoot 的规则要按它自己的工具根判定不确定形态"
+        )
+        XCTAssertNil(
+            RuleSetAdmission.rejection(forRule: displayOnlyRule, homeDirectory: home),
+            "displayOnly 根不是分类声明的基准，不能据此判出不确定降级"
+        )
+    }
+
     // MARK: 用户规则只能抬高保护
 
     func test用户规则把路径加入受保护集合时被接受且该路径确实受保护() throws {
@@ -198,19 +220,51 @@ final class RuleSetAdmissionTests: XCTestCase {
 
     // MARK: 保护单调性（核心断言，直接打 Seam 2）
 
-    func test把受保护路径标成缓存不构成降级但要给出提示() throws {
+    /// spec #7 §规则集准入：「任何用户规则试图把某路径从「受保护」降级为「可归档」，
+    /// **或从「可归档」升级为「受保护」以外的其它类别**，准入必须**拒绝该规则**」。
+    ///
+    /// 标成缓存不是「无害的错标」：它让界面显示一个「可以随手清掉」的标签，
+    /// 而内置清单说这条路径受保护。用户规则只能把它抬高成受保护，不能改判。
+    func test把内置受保护路径改判为缓存同样被拒绝() throws {
         let home = try makeHome()
-        let claude = try decode(RuleFixtures.claudeCodeJSON)
+        let rule = try decode(RuleAdmissionFixtures.claudeShellSnapshotsCacheJSON)
 
-        let report = RuleSetAdmission.admit(rules: [claude], homeDirectory: home)
+        let rejection = RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)
 
-        // 缓存与日志同样「只展示、不动」，不授予删除权限，因此不构成降级（PRD §5.1）。
-        XCTAssertEqual(report.usableRules.map(\.id), ["claude-code"])
-        let warning = report.warnings.first { $0.pattern == "shell-snapshots/**" }
-        XCTAssertEqual(warning?.protectedRuleIdentifier, "claude-code/shell-snapshots")
-        XCTAssertEqual(warning?.declaredCategory, .cacheAndLog)
+        XCTAssertEqual(rejection?.ruleIdentifier, "claude-code-2")
+        XCTAssertEqual(rejection?.reason.protectedRuleIdentifier, "claude-code/shell-snapshots")
+        XCTAssertEqual(rejection?.reason.protectionDeclaredCategory, .cacheAndLog)
+
+        let message = rejection?.description ?? ""
+        XCTAssertTrue(message.contains("classification[1].category"), message)
+        XCTAssertTrue(message.contains("shell-snapshots/**"), message)
+        XCTAssertTrue(message.contains("只能声明为受保护"), message)
     }
 
+    func test把内置受保护路径改判为不确定同样被拒绝() throws {
+        let home = try makeHome()
+        let rule = try decode(RuleAdmissionFixtures.claudeSettingsUncertainJSON)
+
+        let rejection = RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)
+
+        XCTAssertEqual(rejection?.reason.protectedRuleIdentifier, "claude-code/settings")
+        XCTAssertEqual(rejection?.reason.protectionDeclaredCategory, .uncertain)
+        XCTAssertTrue(rejection?.description.contains("settings*.json") ?? false, rejection?.description ?? "")
+    }
+
+    /// 内置受保护清单对**同一个路径**的判定与规则声明必须一致；
+    /// 一旦不一致，规则被拒绝——界面因此永远不会同时显示两个互相矛盾的标签。
+    func test规则声明与内置保护不一致时整条规则不可用() throws {
+        let home = try makeHome()
+        let claude = try decode(RuleFixtures.claudeCodeJSON)
+        let bad = try decode(RuleAdmissionFixtures.claudeShellSnapshotsCacheJSON)
+
+        let report = RuleSetAdmission.admit(rules: [claude, bad], homeDirectory: home)
+
+        XCTAssertEqual(report.usableRules.map(\.id), ["claude-code"])
+        XCTAssertEqual(report.rejections.map(\.ruleIdentifier), ["claude-code-2"])
+        XCTAssertEqual(report.rejections.first?.reason.isProtectionMonotonicityViolation, true)
+    }
 
     func test把内置受保护路径改判为可归档的规则被拒绝() throws {
         let home = try makeHome()
@@ -225,7 +279,7 @@ final class RuleSetAdmissionTests: XCTestCase {
         let message = rejection?.description ?? ""
         XCTAssertTrue(message.contains("classification[2].category"), message)
         XCTAssertTrue(message.contains("auth.json"), message)
-        XCTAssertTrue(message.contains("不能把它降低"), message)
+        XCTAssertTrue(message.contains("只能声明为受保护"), message)
     }
 }
 
@@ -310,6 +364,19 @@ private enum RuleAdmissionFixtures {
 }
 """
 
+    /// 同样的 `*.pb` 降级，但唯一的根是 `displayOnly`（只展示占用的位置）。
+    static let displayOnlyUncertainDowngradeJSON = """
+{
+  "schemaVersion": 1,
+  "id": "user-extension",
+  "displayName": "用户扩展工具",
+  "roots": [{ "path": "~/Library/Application Support/Cursor", "role": "displayOnly" }],
+  "classification": [
+    { "pattern": "*.pb", "category": "archivableSession" }
+  ]
+}
+"""
+
     /// 用户规则把一条自定义路径**加入**受保护集合（抬高保护永远允许）。
     static let userProtectedAdditionJSON = """
 {
@@ -334,6 +401,33 @@ private enum RuleAdmissionFixtures {
     { "pattern": "config.toml", "category": "protected" },
     { "pattern": "auth.json", "category": "archivableSession" },
     { "pattern": "prompts/**", "category": "protected" }
+  ]
+}
+"""
+
+    /// 把内置受保护条目 `claude-code/shell-snapshots` 改判成缓存与日志。
+    static let claudeShellSnapshotsCacheJSON = """
+{
+  "schemaVersion": 1,
+  "id": "claude-code-2",
+  "displayName": "Claude Code（快照当成缓存）",
+  "roots": [{ "path": "~/.claude", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "projects/<encodedPath>/<uuid>.jsonl", "category": "archivableSession" },
+    { "pattern": "shell-snapshots/**", "category": "cacheAndLog" }
+  ]
+}
+"""
+
+    /// 把内置受保护条目 `claude-code/settings` 改判成不确定。
+    static let claudeSettingsUncertainJSON = """
+{
+  "schemaVersion": 1,
+  "id": "user-extension",
+  "displayName": "用户扩展工具",
+  "roots": [{ "path": "~/.claude", "role": "toolRoot" }],
+  "classification": [
+    { "pattern": "settings*.json", "category": "uncertain" }
   ]
 }
 """

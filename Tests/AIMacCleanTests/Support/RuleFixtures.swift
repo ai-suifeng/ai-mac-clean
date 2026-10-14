@@ -5,6 +5,10 @@ import Foundation
 /// 形状照抄 PRD §5.4 的本机实测结论，而不是照抄更早的描述——两者在
 /// `file-history/` / `todos/` 的存在性上已经不一致（PRD §14.5）。
 ///
+/// **与内置受保护清单对齐**：`shell-snapshots/**`（`claude-code/shell-snapshots`）与
+/// `*.sqlite`（`codex-cli/sqlite`）都声明为 `protected`，不是更弱的类别——
+/// 规则集准入现在会把「改判成别的类别」当成拒绝理由，夹具必须零拒绝才能被下游测试使用。
+///
 /// 全部规则只用于解码测试，路径都写在这里的字符串里，不指向真实数据目录。
 enum RuleFixtures {
 
@@ -39,7 +43,7 @@ enum RuleFixtures {
         { "pattern": "skills/**", "category": "protected" },
         { "pattern": "commands/**", "category": "protected" },
         { "pattern": "history.jsonl", "category": "protected" },
-        { "pattern": "shell-snapshots/**", "category": "cacheAndLog" }
+        { "pattern": "shell-snapshots/**", "category": "protected" }
       ],
       "selfCompressed": false,
       "sessionFileNaming": {
@@ -81,7 +85,7 @@ enum RuleFixtures {
         { "pattern": "config.toml.*", "category": "protected" },
         { "pattern": "auth.json", "category": "protected" },
         { "pattern": "prompts/**", "category": "protected" },
-        { "pattern": "*.sqlite", "category": "uncertain" },
+        { "pattern": "*.sqlite", "category": "protected" },
         { "pattern": ".tmp/**", "category": "cacheAndLog" }
       ],
       "selfCompressed": true,

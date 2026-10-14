@@ -5,7 +5,7 @@ import AIMacCleanDomain
 
 /// 发现与确认页的视图模型（issue #16）。
 ///
-/// 页面里所有会出错的状态都在这里：分档、折叠、决定落盘、移出 / 加回、
+/// 页面里所有会出错的状态都在这里：分档、折叠、决定落盘、移出列表 / 加回、
 /// 权限提示、加载失败。视图只做渲染与转发，因此这一层可以在没有窗口的情况下测。
 ///
 /// ## 不变式
@@ -37,7 +37,7 @@ public final class DiscoveryPageModel: ObservableObject {
 
     /// - Parameters:
     ///   - source: 发现管线（生产用 `DiscoveryService`，测试给固定结果）。
-    ///   - store: 确认存储。决定、移出、加回都直接写它。
+    ///   - store: 确认存储。决定、移出列表、加回都直接写它。
     ///   - settings: 设置项（纯名称候选是否默认折叠）。传 `nil` 时按默认值处理。
     ///   - homeDirectory: 路径展示用的主目录，由调用方注入，测试才不用碰真实主目录。
     ///   - now: 决定时刻的时钟，由调用方注入。
@@ -96,10 +96,12 @@ public final class DiscoveryPageModel: ObservableObject {
         decide(toolRootPath: toolRootPath, decision: .ignored)
     }
 
-    /// 把已确认的工具移出列表（User Story 17）。记录被删除，因此该候选会重新变成待确认。
-    public func removeConfirmed(toolRootPath: String) {
+    /// 把已确认的工具**移出列表**，也就是忘掉这条确认记录（User Story 17）。
+    ///
+    /// 记录不再存在，因此该候选会重新变成待确认。动作完全可逆：再确认一次就回来。
+    public func forgetConfirmedTool(toolRootPath: String) {
         perform {
-            try self.store.removeTool(atToolRootPath: toolRootPath)
+            try self.store.forgetTool(atToolRootPath: toolRootPath)
         }
     }
 
@@ -138,9 +140,13 @@ public final class DiscoveryPageModel: ObservableObject {
     static let ignoreShortcut = "⌘I"
 
     /// 把之前忽略的候选加回候选列表（User Story 18）。
-    public func restoreIgnored(toolRootPath: String) {
+    ///
+    /// 底下的动作和「移出列表」是**同一个**：忘掉那条「忽略」记录。
+    /// 叫 `restoreIgnored` 会撞上 GLOSSARY 的「还原」——那个词专指把归档的会话
+    /// 按清单写回原路径（不可逆动作的对立面），不是「让一条判断消失」。
+    public func forgetIgnoredCandidate(toolRootPath: String) {
         perform {
-            try self.store.removeTool(atToolRootPath: toolRootPath)
+            try self.store.forgetTool(atToolRootPath: toolRootPath)
         }
     }
 
@@ -248,7 +254,7 @@ public final class DiscoveryPageModel: ObservableObject {
             case let .hintsUnavailable(reason):
                 return L10n.format(.discoveryIssueHintsUnavailable, [reason])
             case let .noUsableRules(rejectedCount):
-                return L10n.text(.discoveryIssueNoRules) + "（\(rejectedCount) 条规则未通过准入）"
+                return L10n.format(.discoveryIssueRulesRejected, ["\(rejectedCount)"])
             }
         }
     }
@@ -266,7 +272,7 @@ public final class DiscoveryPageModel: ObservableObject {
 
     /// 依当前存储里的记录重算整屏状态。
     ///
-    /// 不重新扫描磁盘：决定 / 移出 / 加回都只改记录，候选本身没变。
+    /// 不重新扫描磁盘：决定 / 移出列表 / 加回都只改记录，候选本身没变。
     private func rebuildState() {
         let result = latestRun.result
         let pendingPaths = Set(store.pendingToolRootPaths(amongCandidates: result.candidateToolRootPaths))

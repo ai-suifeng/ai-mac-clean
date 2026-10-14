@@ -183,6 +183,49 @@ final class ToolDiscovererTests: XCTestCase {
         XCTAssertEqual(candidate.ruleIdentifier, "opencode")
     }
 
+    /// **已记录的偏差**（PRD §13.1）：spec #7 / US2 写的是「浅扫只遍历一级子目录」，
+    /// 但规则声明的工具根在扫描根之下**任意深度**都会被补看一次。
+    ///
+    /// 理由：Harness 的工具根是 `~/Library/Application Support` 的孙子（PRD §14.5），
+    /// 只扫一层就永远发现不了它，而「发现非标准位置」是 US7 的要求。
+    ///
+    /// 这条断言钉住偏差的**成本边界**：补漏只判断声明路径本身存在与否，
+    /// 路径不存在就是「没有可看的东西」，不会为了找它去枚举父目录。
+    func test扫描深度偏差只判断声明路径存在与否而不去枚举父目录() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 扫描根 `~/Library/Application Support` 的孙子：补漏能捡起来。
+        try fixture.makeFile(
+            "Library/Application Support/deepseek-harness-desktop/harness-home"
+                + "/sessions/--Users-xiaowei-work-amc-wt-12--/session-9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f"
+                + "/session.jsonl.zstd",
+            contents: ""
+        )
+        // 同一条规则的**另一个**声明根，路径在磁盘上压根不存在：
+        // 补漏对它是「没有可看的东西」，而不是一次失败，更不会去枚举它缺失的父目录。
+        let ghostRule = RuleFixtures.harnessJSON
+            .replacingOccurrences(
+                of: "\"~/Library/Application Support/deepseek-harness-desktop/harness-home\"",
+                with: "\"~/Library/Application Support/never-created-desktop/harness-home\""
+            )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([ghostRule]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertEqual(
+            result.candidates.map(\.toolRootPath),
+            [],
+            "声明的工具根在磁盘上不存在时，补漏不产生候选：\(result.candidates.map(\.toolRootPath))"
+        )
+        XCTAssertTrue(
+            result.unreadableDirectories.isEmpty,
+            "路径缺失不是读不到，不该被报成权限类问题：\(result.unreadableDirectories)"
+        )
+    }
+
     // MARK: - 切片 6：负向名单与干扰项（User Story 5、6、9；PRD A1）
 
     func test伴生小工具与只有名字像的目录都不进候选() throws {
@@ -248,6 +291,102 @@ final class ToolDiscovererTests: XCTestCase {
             candidate.signals.structuralFingerprints.isEmpty,
             "降权不改变它确实命中结构事实这件事"
         )
+    }
+
+    /// 负向名单只比对**扫描器真正判定的那些段**：工具根自身的名字，以及它相对扫描根的路径。
+    ///
+    /// 它绝不该去比对 `$HOME` **以上**的段：否则一个叫 `…-backup/Users/x` 的主目录
+    /// 会把该主目录下每一个候选都降权成疑似——降权理由写在界面上却是
+    /// 「命中负向名单 *backup*」，而那条路径本身一点问题都没有。
+    func test负向名单不比对主目录以上的路径段() throws {
+        let outer = try TemporaryDirectoryFixture(named: "host")
+        defer { outer.remove() }
+
+        // 主目录自己的名字里含 `backup`——比 `$HOME` 高一层的路径段。
+        let home = try outer.makeDirectory("my-backup-home").path
+        try writeTestFile(
+            relativePath: "my-backup-home/.claude/projects/-Users-xiaowei-amc-wt-12/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: DiscoveryFixture.sampleTranscriptLine,
+            in: outer
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON]),
+            hints: DiscoveryHints(negativeNamePatterns: ["*backup*"]),
+            homeDirectory: home
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(
+            candidate.demotions, [],
+            "主目录的名字不是扫描器判定的对象，命中它说明比对范围越过了扫描根：\(candidate.demotions)"
+        )
+        XCTAssertFalse(candidate.isSuspicious)
+        // 结构指纹 + 文件头字段特征 = 高（这里刻意不降权，主目录叫什么与它无关）。
+        XCTAssertEqual(candidate.confidence, .high)
+    }
+
+    /// 外部佐证按**候选所属的规则**去找，不按目录名命中了哪个关键词去找。
+    ///
+    /// 早期实现把两件事混成一件：先筛出「名字里命中的关键词」，再用这些关键词去找
+    /// 同名 App / PATH 命令。于是词表一旦没给某条规则配关键词——词表是用户可改的配置，
+    /// 漏配很正常——装了 OpenCode 也佐证不了 `~/.local/share/opencode`。
+    /// 规则自己知道它是什么工具，`displayName` 与它声明的关键词才是佐证该拿去找的东西。
+    func test外部佐证按候选所属的规则去找而不是按目录名命中的关键词() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        try fixture.makeFile(
+            ".local/share/opencode/storage/-Users-xiaowei-amc-wt-12/session/message/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.json"
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedBundledRules(),
+            // 词表**没有**给 opencode 配任何关键词（目录名 `opencode` 因此一个都命中不了）。
+            hints: DiscoveryHints(nameKeywords: ["claude-code": ["claude"]]),
+            externalEvidence: ExternalEvidence(applicationNames: ["OpenCode"], commandNames: ["opencode"]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first { $0.ruleIdentifier == "opencode" })
+        XCTAssertEqual(
+            candidate.signals.externalCorroborations,
+            [.application("OpenCode"), .command("opencode")],
+            "装了 OpenCode 就该佐证 ~/.local/share/opencode，与目录名有没有命中关键词无关："
+                + "\(candidate.signals.externalCorroborations)"
+        )
+        XCTAssertTrue(
+            candidate.signals.nameMatches.isEmpty,
+            "名称命中仍然只反映目录名，不该被佐证顺带填上：\(candidate.signals.nameMatches)"
+        )
+        XCTAssertEqual(candidate.confidence, .high, "结构指纹 + 外部佐证 = 高")
+    }
+
+    /// 仍然要防住反向的过度匹配：不相干的 App 不构成佐证。
+    func test与规则无关的应用名不构成外部佐证() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        try fixture.makeFile(
+            ".local/share/opencode/storage/-Users-xiaowei-amc-wt-12/session/message/"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.json"
+        )
+
+        let result = ToolDiscoverer(
+            rules: try admittedBundledRules(),
+            hints: DiscoveryHints(nameKeywords: ["claude-code": ["claude"]]),
+            externalEvidence: ExternalEvidence(applicationNames: ["Xcode", "Notes"]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        let candidate = try XCTUnwrap(result.candidates.first { $0.ruleIdentifier == "opencode" })
+        XCTAssertTrue(
+            candidate.signals.externalCorroborations.isEmpty,
+            "不相干的 App 不算佐证：\(candidate.signals.externalCorroborations)"
+        )
+        XCTAssertEqual(candidate.confidence, .medium)
     }
 
     func test名称关键词只影响顺序不影响入列() throws {

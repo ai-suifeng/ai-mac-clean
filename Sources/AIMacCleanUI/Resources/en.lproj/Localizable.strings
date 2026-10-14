@@ -34,7 +34,7 @@
 "discovery.badge.suspicious" = "Suspected";
 "discovery.action.confirm" = "Confirm AI tool";
 "discovery.action.ignore" = "Ignore";
-"discovery.action.remove" = "Remove";
+"discovery.action.forget" = "Forget";
 "discovery.action.restore" = "Add back";
 "discovery.section.pending" = "Candidates to confirm";
 "discovery.section.confirmed" = "Confirmed tools";
@@ -64,6 +64,7 @@
 "discovery.permission.row" = "%1$@ (%2$@)";
 "discovery.permission.footnote" = "This notice only appears after an actual access failure. The app never asks for Full Disk Access up front.";
 "discovery.issue.noRules" = "No built-in rule files were loaded, so the candidate list is empty. Check that the packaged app embeds the rules resources — this build has no usable tool rules.";
+"discovery.issue.rulesRejected" = "%@ rule file(s) were loaded, but none of them passed rule-set admission (the protection-monotonicity check), so the candidate list is empty.";
 "discovery.issue.hintsUnavailable" = "The keyword / negative-name list could not be read: %@. Candidates are still discovered, but old snapshots and companion tools will not be demoted.";
 "discovery.issue.storeUnreadable" = "The confirmation records could not be read: %@. To avoid overwriting your existing decisions, nothing was saved this time.";
 "discovery.issue.actionFailed" = "The action was not saved: %@";
