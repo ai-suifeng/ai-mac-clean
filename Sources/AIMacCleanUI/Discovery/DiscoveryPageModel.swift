@@ -103,6 +103,40 @@ public final class DiscoveryPageModel: ObservableObject {
         }
     }
 
+    // MARK: - 键盘（User Story 41）
+
+    /// 一个候选行上两个动作的标识。键盘与按钮走的是**同一组**方法——
+    /// 因此「只用键盘完成确认与忽略」与「用鼠标点」行为完全一致，不存在两套语义。
+    public enum RowAction: CaseIterable, Sendable {
+        /// 主操作：确认是 AI 工具。
+        case confirm
+        /// 次操作：忽略。
+        case ignore
+    }
+
+    /// 键盘主操作（Return）：确认当前行。
+    public func performDefaultAction(onToolRootPath path: String) {
+        confirm(toolRootPath: path)
+    }
+
+    /// 键盘次操作：忽略当前行。
+    public func performSecondaryAction(onToolRootPath path: String) {
+        ignore(toolRootPath: path)
+    }
+
+    /// 某个动作的快捷键说明，供视图挂到按钮上（辅助技术也会读它）。
+    public func keyboardShortcut(for action: RowAction) -> String? {
+        switch action {
+        case .confirm: return Self.confirmShortcut
+        case .ignore: return Self.ignoreShortcut
+        }
+    }
+
+    /// Return：候选行里最常用的那个动作（确认）。
+    static let confirmShortcut = "↩"
+    /// ⌘I：忽略。与确认不同键，因此两只手都能停在同一个位置完成两步。
+    static let ignoreShortcut = "⌘I"
+
     /// 把之前忽略的候选加回候选列表（User Story 18）。
     public func restoreIgnored(toolRootPath: String) {
         perform {

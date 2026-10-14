@@ -29,6 +29,8 @@
 "discovery.group.high" = "高置信度：结构指纹 + 外部佐证";
 "discovery.group.medium" = "中置信度：仅结构指纹";
 "discovery.group.low" = "疑似候选：只有位置或名字像，没有任何结构证据";
+"discovery.group.expanded" = "已展开";
+"discovery.group.collapsed" = "已折叠";
 "discovery.confidence.high" = "高";
 "discovery.confidence.medium" = "中";
 "discovery.confidence.low" = "低";

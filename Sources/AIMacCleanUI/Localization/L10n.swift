@@ -60,6 +60,8 @@ public enum L10n {
         case discoveryGroupHigh = "discovery.group.high"
         case discoveryGroupMedium = "discovery.group.medium"
         case discoveryGroupLow = "discovery.group.low"
+        case discoveryGroupExpanded = "discovery.group.expanded"
+        case discoveryGroupCollapsed = "discovery.group.collapsed"
         case discoveryConfidenceHigh = "discovery.confidence.high"
         case discoveryConfidenceMedium = "discovery.confidence.medium"
         case discoveryConfidenceLow = "discovery.confidence.low"

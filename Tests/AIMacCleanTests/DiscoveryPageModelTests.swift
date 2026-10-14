@@ -278,6 +278,51 @@ final class DiscoveryPageModelTests: XCTestCase {
         XCTAssertEqual(Set(texts).count, 3)
     }
 
+    // MARK: - 键盘可达（User Story 41）
+
+    func test只用键盘就能确认与忽略() throws {
+        // 键盘走的是**同一组**模型方法（视图把按键转发到这里），因此不需要鼠标也能走完全流程。
+        let candidate = Candidate.fixtureCandidate(confidence: .high, pathSuffix: "claude")
+        let model = try makeModel(candidates: [candidate])
+
+        model.performDefaultAction(onToolRootPath: "/tmp/fake-home/.claude")
+
+        XCTAssertEqual(model.state.confirmedTools.map(\.displayPath), ["~/.claude"])
+        XCTAssertEqual(model.state.pendingGroups, [])
+        XCTAssertNil(model.state.lastActionFailure)
+    }
+
+    func test键盘忽略走的是同一个忽略落盘路径() throws {
+        let candidates: [Candidate] = [.fixtureCandidate(confidence: .medium, pathSuffix: "tool")]
+        let model = try makeModel(candidates: candidates)
+
+        model.performSecondaryAction(onToolRootPath: "/tmp/fake-home/.tool")
+
+        XCTAssertEqual(model.state.ignoredCandidates.count, 1)
+        XCTAssertEqual(reopenStore().ignoredCandidates.map(\.toolRootPath), ["/tmp/fake-home/.tool"])
+    }
+
+    func test键盘动作对不在列表里的路径是空操作() throws {
+        let model = try makeModel(candidates: [.fixtureCandidate(confidence: .high, pathSuffix: "claude")])
+
+        model.performDefaultAction(onToolRootPath: "/tmp/fake-home/.别的东西")
+        model.performSecondaryAction(onToolRootPath: "/tmp/fake-home/.别的东西")
+
+        XCTAssertEqual(model.state.confirmedTools, [])
+        XCTAssertEqual(model.state.ignoredCandidates, [])
+        XCTAssertNil(model.state.lastActionFailure)
+    }
+
+    func test两个键盘动作有各自不同的快捷键说明() throws {
+        let model = try makeModel(candidates: [])
+
+        let confirm = try XCTUnwrap(model.keyboardShortcut(for: .confirm))
+        let ignore = try XCTUnwrap(model.keyboardShortcut(for: .ignore))
+        XCTAssertFalse(confirm.isEmpty)
+        XCTAssertFalse(ignore.isEmpty)
+        XCTAssertNotEqual(confirm, ignore, "两个动作不能共用同一个键")
+    }
+
     // MARK: - 辅助
 
     /// 「重启」：从同一个磁盘位置重新读一次确认存储。

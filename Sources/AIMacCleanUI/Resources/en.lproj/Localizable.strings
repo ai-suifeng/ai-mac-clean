@@ -26,6 +26,8 @@
 "discovery.group.high" = "High confidence: structural fingerprint + external evidence";
 "discovery.group.medium" = "Medium confidence: structural fingerprint only";
 "discovery.group.low" = "Suspected: only the location or the name looks right, no structural evidence";
+"discovery.group.expanded" = "expanded";
+"discovery.group.collapsed" = "collapsed";
 "discovery.confidence.high" = "High";
 "discovery.confidence.medium" = "Medium";
 "discovery.confidence.low" = "Low";
