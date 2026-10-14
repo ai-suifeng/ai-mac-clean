@@ -276,6 +276,94 @@ final class ToolDiscovererTests: XCTestCase {
         )
     }
 
+    // MARK: - 切片 7：符号链接不跟随、权限错误按目录隔离（User Story 12、14）
+
+    func test指向树外的符号链接既不被遍历也不会把链接目标变成候选() throws {
+        let outside = try TemporaryDirectoryFixture(named: "link-target")
+        defer { outside.remove() }
+
+        // 树外有完整的 Claude 与 Codex 工具根形状。
+        try writeTestFile(
+            relativePath: "outside-claude/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: DiscoveryFixture.sampleTranscriptLine,
+            in: outside
+        )
+        try writeTestFile(
+            relativePath: "outside-codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: "",
+            in: outside
+        )
+
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // `.claude` 是真目录，但里面的 projects 指向树外：链接里的会话文件不算结构证据。
+        try fixture.makeFile(".claude/settings.json", contents: "{}")
+        try fixture.makeSymbolicLink(
+            ".claude/projects",
+            pointingTo: outside.url.path + "/outside-claude/projects"
+        )
+        // `.codex` 本身就是指向树外的链接：PRD §14.5 说工具根本身不是链接，
+        // 浅扫不跟随符号链接，因此它不进候选，链接目标里的目录也不会被当成候选。
+        try fixture.makeSymbolicLink(".codex", pointingTo: outside.url.path + "/outside-codex")
+        try fixture.makeSymbolicLink("vendor", pointingTo: outside.url.path + "/outside-codex")
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON, RuleFixtures.codexJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        XCTAssertEqual(
+            result.candidates.map(\.toolRootPath),
+            [fixture.homePath + "/.claude"],
+            "指向树外的符号链接既不进候选，也不会把链接目标变成候选"
+        )
+        let claudeCandidate = try XCTUnwrap(result.candidates.first)
+        XCTAssertEqual(
+            claudeCandidate.confidence, .low,
+            "链接里的会话文件不算结构证据：\(claudeCandidate.signals.structuralFingerprints)"
+        )
+    }
+
+    func test无权访问的目录被跳过并在结果里说明整体扫描不失败() throws {
+        try XCTSkipIf(getuid() == 0, "root 会绕过目录权限，这个用例在 root 下没有意义")
+
+        let fixture = try DiscoveryFixture()
+        defer {
+            fixture.restoreAccess(toRelativePath: ".codex/sessions")
+            fixture.home.remove()
+        }
+
+        try fixture.makeFile(".claude/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
+        try fixture.makeFile(
+            ".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-"
+                + "9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
+            contents: ""
+        )
+        try fixture.denyAccess(toRelativePath: ".codex/sessions")
+
+        let result = ToolDiscoverer(
+            rules: try admittedRules([RuleFixtures.claudeCodeJSON, RuleFixtures.codexJSON]),
+            homeDirectory: fixture.homePath
+        ).discover()
+
+        // 整体扫描没失败：可读的那个工具根照常发现。
+        XCTAssertTrue(
+            result.candidates.contains { $0.toolRootPath == fixture.homePath + "/.claude" },
+            "一个目录读不到不应该影响其它目录：\(result.candidates.map(\.toolRootPath))"
+        )
+        // 读不到的位置逐个说明。
+        let unreadable = try XCTUnwrap(
+            result.unreadableDirectories.first { $0.path == fixture.homePath + "/.codex/sessions" },
+            "读不到的位置必须在结果里说明：\(result.unreadableDirectories)"
+        )
+        XCTAssertTrue(
+            unreadable.description.contains("权限不足"),
+            "说明要指名原因，而不是一句看不懂的系统错误：\(unreadable.description)"
+        )
+    }
+
     // MARK: - 切片 3：置信度三档（spec #7 §置信度模型）
 
     func test只有结构指纹没有佐证判为中置信度() throws {
@@ -417,4 +505,14 @@ private func admittedRules(_ ruleJSON: [String]) throws -> [ToolRule] {
     let report = RuleSetAdmission.admit(rules: rules, homeDirectory: NSTemporaryDirectory())
     XCTAssertTrue(report.rejections.isEmpty, "夹具规则不该被准入拒绝：\(report.rejections)")
     return report.usableRules
+}
+
+/// 在任意临时夹具下写文件（树外的夹具也用得上）。
+private func writeTestFile(relativePath: String, contents: String, in fixture: TemporaryDirectoryFixture) throws {
+    let url = fixture.url.appendingPathComponent(relativePath)
+    try FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try contents.write(to: url, atomically: true, encoding: .utf8)
 }
