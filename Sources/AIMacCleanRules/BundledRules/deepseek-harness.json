@@ -6,6 +6,9 @@
     { "path": "~/Library/Application Support/deepseek-harness-desktop/harness-home", "role": "toolRoot" },
     { "path": "~/Library/Application Support/@deepseek-ai/dsh-desktop", "role": "displayOnly" }
   ],
+  "installations": [
+    { "path": "/Applications/DeepSeek Harness.app", "kind": "appBundle" }
+  ],
   "structuralFingerprint": {
     "sessionFilePatterns": [
       "sessions/<encodedPath>/session-<uuid>/session.jsonl.zstd"

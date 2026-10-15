@@ -89,6 +89,61 @@ final class BundledToolRuleTests: XCTestCase {
         XCTAssertEqual(report.usableRules.map(\.id), rules.map(\.id))
     }
 
+    // MARK: Slice 3：安装路径声明（issue #19）
+
+    /// 内置规则各自声明**确有其事**的安装位置；没有已知位置的工具就一条都不声明。
+    ///
+    /// 这张表就是「哪些工具会被安装佐证抬到『高』」的全部依据——多写一条等于多 stat
+    /// 一个位置并可能给出假佐证，因此它要被逐条钉住，而不是「大概有这么几个」。
+    func test内置规则声明各自的安装路径() throws {
+        let (rules, _) = try loadBundledRules()
+        let byIdentifier = Dictionary(uniqueKeysWithValues: rules.map { ($0.id, $0.installations) })
+
+        XCTAssertEqual(byIdentifier["claude-code"], [
+            DeclaredInstallation(path: "~/.claude/local/claude", kind: .executable),
+            DeclaredInstallation(path: "~/.local/bin/claude", kind: .executable),
+        ])
+        XCTAssertEqual(byIdentifier["codex-cli"], [
+            DeclaredInstallation(path: "/opt/homebrew/bin/codex", kind: .executable),
+            DeclaredInstallation(path: "/usr/local/bin/codex", kind: .executable),
+        ])
+        XCTAssertEqual(byIdentifier["cursor"], [
+            DeclaredInstallation(path: "/Applications/Cursor.app", kind: .appBundle),
+            DeclaredInstallation(path: "~/Applications/Cursor.app", kind: .appBundle),
+        ])
+        XCTAssertEqual(byIdentifier["deepseek-harness"], [
+            DeclaredInstallation(path: "/Applications/DeepSeek Harness.app", kind: .appBundle),
+        ])
+        XCTAssertEqual(
+            byIdentifier["opencode"], [],
+            "OpenCode 没有确有其事的安装路径，就一条都不声明——不为了凑置信度编路径（issue #19）。"
+        )
+    }
+
+    /// 声明的路径必须指向**那个工具自己**：最后一段里要含该工具标识的至少一个词。
+    ///
+    /// 这条纪律防的是「为了凑置信度随手写一个通用位置」：那样要么永远给不出佐证，
+    /// 要么把别的工具的存在当成自己的证据。它也是「不得列举通用位置」在数据层的对应物。
+    func test内置规则的安装路径都指向工具自己() throws {
+        let (rules, _) = try loadBundledRules()
+
+        for rule in rules {
+            let tokens = rule.id.split(separator: "-").map { $0.lowercased() }
+            for installation in rule.installations {
+                let name = installation.path
+                    .split(separator: "/")
+                    .last
+                    .map(String.init)?
+                    .lowercased()
+                    .replacingOccurrences(of: ".app", with: "") ?? ""
+                XCTAssertTrue(
+                    tokens.contains { name.contains($0) },
+                    "规则 \(rule.id) 声明的安装路径 \(installation.path) 看起来不是这个工具自己的位置。"
+                )
+            }
+        }
+    }
+
     /// 内置规则里凡是撞上内置受保护清单的路径，必须**声明为受保护**。
     /// 标成缓存与日志或不确定同样会被准入拒绝（spec #7 §规则集准入），
     /// 因此出厂规则与内置清单必须逐条对齐，而不是靠界面去解释两者不一致。

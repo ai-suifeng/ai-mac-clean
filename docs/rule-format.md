@@ -225,16 +225,18 @@ Sources/AIMacCleanRules/BuiltInRuleResources.swift ← 只给出这个目录在 
 
 ### 内置规则一览
 
-| 规则文件 | 工具根 | 项目路径编码 | 自带压缩 | 覆盖深度 |
-|---|---|---|---|---|
-| `claude-code.json` | `~/.claude` | `singleDash` | 否 | 实测校正（PRD §5.4 / §14.5） |
-| `codex-cli.json` | `~/.codex` | `inFileField`（`session_meta.payload.cwd`） | 是（`.zst`） | 实测校正 |
-| `cursor.json` | `~/.cursor` | `singleDash` | 否 | 仅格式可表达（里程碑 6） |
-| `deepseek-harness.json` | `…/deepseek-harness-desktop/harness-home` | `doubleDash` | 是（`.zstd`） | 仅格式可表达 |
-| `opencode.json` | `~/.local/share/opencode` | 不声明 | 否 | 仅发现（User Story 7） |
+| 规则文件 | 工具根 | 安装路径声明 | 项目路径编码 | 自带压缩 | 覆盖深度 |
+|---|---|---|---|---|---|
+| `claude-code.json` | `~/.claude` | `~/.claude/local/claude`、`~/.local/bin/claude` | `singleDash` | 否 | 实测校正（PRD §5.4 / §14.5） |
+| `codex-cli.json` | `~/.codex` | `/opt/homebrew/bin/codex`、`/usr/local/bin/codex` | `inFileField`（`session_meta.payload.cwd`） | 是（`.zst`） | 实测校正 |
+| `cursor.json` | `~/.cursor` | `/Applications/Cursor.app`、`~/Applications/Cursor.app` | `singleDash` | 否 | 仅格式可表达（里程碑 6） |
+| `deepseek-harness.json` | `…/deepseek-harness-desktop/harness-home` | `/Applications/DeepSeek Harness.app` | `doubleDash` | 是（`.zstd`） | 仅格式可表达 |
+| `opencode.json` | `~/.local/share/opencode` | **不声明**（没有确有其事的路径） | 不声明 | 否 | 仅发现（User Story 7） |
 
 写这些规则时用掉的几条纪律：
 
+- **安装路径只写确有其事的**：`opencode.json` 一条都不声明，因此 OpenCode 拿不到安装佐证、
+  停在「中」——这是正确的保守取值，不是遗漏。**宁可没有佐证，也不编一条路径出来。**
 - **版本差异靠「容忍缺失」表达，不靠两套规则**：新版 Claude Code 没有
   `file-history/`、`todos/`、`statsig/`（文件历史已内联进转录），旧版才有。
   规则把它们声明成会话级联的关联数据即可——加载与准入都不 stat 磁盘，
