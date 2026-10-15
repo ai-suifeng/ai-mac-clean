@@ -21,6 +21,17 @@ public struct ExternalEvidence: Equatable, Sendable {
     /// 没有任何外部佐证。
     public static let none = ExternalEvidence()
 
+    /// 两份佐证合并成一份（取并集）。
+    ///
+    /// 调用方已经采集好一份（测试常这么做），同时又给了安装位置让发现器自己采集时，
+    /// 两份都算数——合并而不是二选一，免得「注入的值」意外盖掉「真采集到的值」。
+    public func merging(_ other: ExternalEvidence) -> ExternalEvidence {
+        ExternalEvidence(
+            applicationNames: applicationNames.union(other.applicationNames),
+            commandNames: commandNames.union(other.commandNames)
+        )
+    }
+
     /// 为一条候选的**规则**找外部佐证。
     ///
     /// 匹配忽略大小写与 `.app` 后缀：`claude-code` 的关键词 `claude` 在
@@ -54,10 +65,13 @@ public enum ExternalEvidenceCollector {
     /// 列举应用目录下的应用名（`Claude.app` → `Claude`）。
     ///
     /// 只读目录的一级，不跟随符号链接；目录读不到只是**没有佐证**，不算错误。
-    public static func applicationNames(inDirectories directories: [String]) -> Set<String> {
+    public static func applicationNames(
+        inDirectories directories: [String],
+        fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem()
+    ) -> Set<String> {
         var names: Set<String> = []
         for directory in directories {
-            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: directory) else { continue }
+            guard let entries = try? fileSystem.entryNames(inDirectory: directory) else { continue }
             for entry in entries where entry.lowercased().hasSuffix(".app") {
                 names.insert(String(entry.dropLast(4)))
             }
@@ -70,13 +84,16 @@ public enum ExternalEvidenceCollector {
     /// PATH 里的命令常常是指向别处的符号链接（`/opt/homebrew/bin` → `Cellar`），
     /// 这里读的是**链接自身的文件名**（`claude`），不解析链接目标——
     /// 与「不跟随符号链接」的其余部分保持一致。
-    public static func commandNames(inDirectories directories: [String]) -> Set<String> {
+    public static func commandNames(
+        inDirectories directories: [String],
+        fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem()
+    ) -> Set<String> {
         var names: Set<String> = []
         for directory in directories {
-            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: directory) else { continue }
+            guard let entries = try? fileSystem.entryNames(inDirectory: directory) else { continue }
             for entry in entries {
                 let path = directory + "/" + entry
-                guard isExecutableFile(atPath: path) else { continue }
+                guard isExecutableFile(atPath: path, fileSystem: fileSystem) else { continue }
                 names.insert(entry)
             }
         }
@@ -84,15 +101,22 @@ public enum ExternalEvidenceCollector {
     }
 
     /// 在给出的位置采集一次外部佐证。
-    public static func detect(applicationDirectories: [String], commandSearchPaths: [String]) -> ExternalEvidence {
+    ///
+    /// `fileSystem` 默认是真实文件系统；测试注入记录器后，这一次采集访问了哪些目录
+    /// 也会被一并记下来（issue #18：一次发现的磁盘访问要能被逐条断言）。
+    public static func detect(
+        applicationDirectories: [String],
+        commandSearchPaths: [String],
+        fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem()
+    ) -> ExternalEvidence {
         ExternalEvidence(
-            applicationNames: applicationNames(inDirectories: applicationDirectories),
-            commandNames: commandNames(inDirectories: commandSearchPaths)
+            applicationNames: applicationNames(inDirectories: applicationDirectories, fileSystem: fileSystem),
+            commandNames: commandNames(inDirectories: commandSearchPaths, fileSystem: fileSystem)
         )
     }
 
-    private static func isExecutableFile(atPath path: String) -> Bool {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+    private static func isExecutableFile(atPath path: String, fileSystem: any DiscoveryFileSystem) -> Bool {
+        guard let attributes = fileSystem.attributes(ofItemAt: path),
               attributes[.type] as? FileAttributeType == .typeRegular,
               let permissions = attributes[.posixPermissions] as? NSNumber
         else { return false }

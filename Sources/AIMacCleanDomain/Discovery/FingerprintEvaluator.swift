@@ -49,10 +49,15 @@ enum FingerprintEvaluator {
 
     /// 在一个工具根下比对结构指纹。
     ///
+    /// - Parameters:
+    ///   - toolRootPath: 规则声明的工具根绝对路径。
+    ///   - reader: 目录读取器；它背后是可注入的 `DiscoveryFileSystem`（issue #18），
+    ///     测试据此断言「一次发现只访问了规则声明的工具根子树」。
     /// - Returns: 命中的结构特征，以及沿途读不到的目录（按目录粒度隔离）。
     static func evaluate(
         fingerprint: StructuralFingerprint,
-        toolRootPath: String
+        toolRootPath: String,
+        reader: ShallowDirectoryReader = ShallowDirectoryReader()
     ) -> (evidence: Evidence, unreadable: [UnreadableDirectory]) {
         var evidence = Evidence()
         var unreadable: [UnreadableDirectory] = []
@@ -70,7 +75,7 @@ enum FingerprintEvaluator {
 
             let entries: [ShallowDirectoryReader.Entry]
             do {
-                entries = try ShallowDirectoryReader.entries(in: current.path)
+                entries = try reader.entries(in: current.path)
             } catch {
                 // 权限错误按目录粒度隔离：只影响这个目录，整体扫描继续。
                 unreadable.append(UnreadableDirectory(path: current.path, reason: reason(of: error)))
@@ -109,7 +114,9 @@ enum FingerprintEvaluator {
 
         // 文件头只读开头若干字节，且只读会话文件（PRD §13 第 3 条）。
         for file in pendingSessionFiles {
-            guard let header = readHeader(of: file, limit: fingerprint.headerByteLimit) else { continue }
+            // 读不到返回 `nil`：那是「没有内容特征」，不是「有」。
+            guard let header = reader.fileSystem.readHeader(ofFileAt: file, limit: fingerprint.headerByteLimit)
+            else { continue }
             evidence.contentFeatures.append(contentsOf: fingerprint.fileHeaderKeys.filter { header.contains($0) })
         }
 
@@ -141,17 +148,6 @@ enum FingerprintEvaluator {
     static func isCompressed(_ fileName: String) -> Bool {
         guard let dot = fileName.lastIndex(of: ".") else { return false }
         return compressedExtensions.contains(String(fileName[fileName.index(after: dot)...]).lowercased())
-    }
-
-    /// 读文件开头的若干字节。读不到返回 `nil`：那是「没有内容特征」，不是「有」。
-    private static func readHeader(of path: String, limit: Int) -> String? {
-        guard limit > 0,
-              let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path))
-        else { return nil }
-        defer { try? handle.close() }
-
-        guard let data = try? handle.read(upToCount: limit), !data.isEmpty else { return nil }
-        return String(data: data, encoding: .utf8)
     }
 
     private static func reason(of error: Error) -> String {

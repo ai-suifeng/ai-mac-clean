@@ -37,22 +37,27 @@ public struct ToolDiscoverer {
     private let rules: [ToolRule]
     private let hints: DiscoveryHints
     private let externalEvidence: ExternalEvidence
+    private let fileSystem: any DiscoveryFileSystem
     private let homeDirectory: String
 
     /// - Parameters:
     ///   - rules: **已准入**的规则集（`RuleSetAdmission.admit(...).usableRules`）。
     ///   - hints: 名称关键词与负向名单。默认空：没有词表就只是不排序、不降权。
     ///   - externalEvidence: 外部佐证（同名 App / PATH 命令）。默认空。
+    ///   - fileSystem: 浅扫读磁盘的那一层（issue #18）。默认真实文件系统；
+    ///     测试注入记录器后可以逐条断言「一次发现访问了哪些路径」。
     ///   - homeDirectory: 把规则里的 `~/` 展开成绝对路径用的主目录，由调用方给出。
     public init(
         rules: [ToolRule],
         hints: DiscoveryHints = .none,
         externalEvidence: ExternalEvidence = .none,
+        fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem(),
         homeDirectory: String
     ) {
         self.rules = rules
         self.hints = hints
         self.externalEvidence = externalEvidence
+        self.fileSystem = fileSystem
         self.homeDirectory = homeDirectory
     }
 
@@ -81,9 +86,10 @@ public struct ToolDiscoverer {
         var unreadable: [UnreadableDirectory] = []
         var candidates: [Candidate] = []
         var seenPaths: Set<String> = []
+        let reader = ShallowDirectoryReader(fileSystem: fileSystem)
 
         for scanRoot in scanRoots {
-            switch shallowEntries(of: scanRoot) {
+            switch shallowEntries(of: scanRoot, reader: reader) {
             case let .failure(directory):
                 unreadable.append(directory)
             case let .success(entries):
@@ -95,6 +101,7 @@ public struct ToolDiscoverer {
                     guard let candidate = candidate(
                         forDirectory: entry,
                         scanRootPath: scanRoot.path,
+                        reader: reader,
                         unreadable: &unreadable
                     ) else { continue }
                     candidates.append(candidate)
@@ -112,7 +119,7 @@ public struct ToolDiscoverer {
             // 但它**不能绕过扫描位置的筛选口径**：`~` 下只看隐藏目录（PRD §4.2），
             // 因此声明在 `~/notes` 这种非隐藏位置的规则不该被这条补漏捡起来。
             guard !isOutsideScanRootFilter(path, scanRoots: scanRoots) else { continue }
-            guard ShallowDirectoryReader.isDirectory(path), !ShallowDirectoryReader.isSymbolicLink(path) else {
+            guard reader.isDirectory(path), !reader.isSymbolicLink(path) else {
                 continue
             }
             let entry = ShallowDirectoryReader.Entry(
@@ -126,6 +133,7 @@ public struct ToolDiscoverer {
                 // 补漏来的路径深度不定，把它归到**最近的那个扫描根**名下，
                 // 名称判定才不会越过扫描根去看更上面的段。
                 scanRootPath: enclosingScanRoot(of: path, in: scanRoots)?.path,
+                reader: reader,
                 unreadable: &unreadable
             ) else { continue }
             candidates.append(candidate)
@@ -181,12 +189,17 @@ public struct ToolDiscoverer {
     private func candidate(
         forDirectory entry: ShallowDirectoryReader.Entry,
         scanRootPath: String?,
+        reader: ShallowDirectoryReader,
         unreadable: inout [UnreadableDirectory]
     ) -> Candidate? {
         guard let rule = rule(declaringToolRootAt: entry.path) else { return nil }
         guard let fingerprint = rule.structuralFingerprint else { return nil }
 
-        let evaluated = FingerprintEvaluator.evaluate(fingerprint: fingerprint, toolRootPath: entry.path)
+        let evaluated = FingerprintEvaluator.evaluate(
+            fingerprint: fingerprint,
+            toolRootPath: entry.path,
+            reader: reader
+        )
         unreadable.append(contentsOf: evaluated.unreadable)
 
         // 两件不同的事，各用各的依据：
@@ -365,11 +378,14 @@ public struct ToolDiscoverer {
     ///
     /// 扫描根不存在只是「这里没有可看的东西」（User Story 22），不算读不到；
     /// 读得到但列不出来（权限不足等）才是需要说明的情况。
-    private func shallowEntries(of scanRoot: ScanRoot) -> ScanRootOutcome {
-        guard ShallowDirectoryReader.isDirectory(scanRoot.path) else { return .success([]) }
+    private func shallowEntries(
+        of scanRoot: ScanRoot,
+        reader: ShallowDirectoryReader
+    ) -> ScanRootOutcome {
+        guard reader.isDirectory(scanRoot.path) else { return .success([]) }
 
         do {
-            let entries = try ShallowDirectoryReader.entries(in: scanRoot.path)
+            let entries = try reader.entries(in: scanRoot.path)
             let filtered = entries.filter { entry in
                 switch scanRoot.entryFilter {
                 case .allEntries:

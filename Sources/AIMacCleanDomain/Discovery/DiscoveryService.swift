@@ -113,8 +113,18 @@ public struct DiscoveryService: DiscoverySource {
 
     public let configuration: Configuration
 
-    public init(configuration: Configuration) {
+    /// 浅扫读磁盘的那一层（issue #18）。默认真实文件系统。
+    ///
+    /// 刻意**不**放进 `Configuration`：配置是要被比较、被断言的值类型（`Equatable`/`Sendable`），
+    /// 而文件系统不是值。测试注入记录器后，一次发现访问了哪些路径、访问了多少次都能逐条断言。
+    public let fileSystem: any DiscoveryFileSystem
+
+    public init(
+        configuration: Configuration,
+        fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem()
+    ) {
         self.configuration = configuration
+        self.fileSystem = fileSystem
     }
 
     /// 应用启动时用的入口：真实 `/Applications`、`~/Applications` 与 `PATH`。
@@ -169,13 +179,15 @@ public struct DiscoveryService: DiscoverySource {
 
         let evidence = ExternalEvidenceCollector.detect(
             applicationDirectories: configuration.applicationDirectories,
-            commandSearchPaths: configuration.commandSearchPaths
+            commandSearchPaths: configuration.commandSearchPaths,
+            fileSystem: fileSystem
         )
 
         let discoverer = ToolDiscoverer(
             rules: rules,
             hints: hints,
             externalEvidence: evidence,
+            fileSystem: fileSystem,
             homeDirectory: configuration.homeDirectory
         )
 
