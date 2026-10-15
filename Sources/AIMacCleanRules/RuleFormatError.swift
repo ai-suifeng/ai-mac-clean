@@ -23,6 +23,8 @@ public enum RuleFormatError: Error, Equatable, Sendable {
     case invalidFieldValue(field: String, reason: String)
     /// 声明了封闭枚举以外的数据类别。
     case unknownDataCategory(String)
+    /// 声明了封闭枚举以外的安装路径种类。
+    case unknownInstallationKind(String)
     /// 规则文件版本不受支持。
     case unsupportedSchemaVersion(found: Int, supported: Int)
     /// 文件不是合法的 UTF-8 JSON。
@@ -52,6 +54,8 @@ extension RuleFormatError: LocalizedError {
             return "规则文件字段 \(field) 的取值不合法：\(reason)"
         case let .unknownDataCategory(value):
             return "规则声明了不存在的数据类别 \(value)。类别是封闭枚举（PRD §5.1）：archivableSession、cacheAndLog、protected、uncertain。"
+        case let .unknownInstallationKind(value):
+            return "规则声明了不存在的安装路径种类 \(value)。种类是封闭枚举：appBundle、executable。"
         case let .unsupportedSchemaVersion(found, supported):
             return "规则文件版本 \(found) 不受支持，本版本只支持 \(supported)。"
         case let .malformedJSON(detail):
@@ -72,6 +76,8 @@ extension RuleFormatError: LocalizedError {
             return "请使用与本应用匹配的规则文件版本。"
         case .unknownDataCategory:
             return "可用的类别只有 archivableSession（可归档会话）、cacheAndLog（缓存与日志）、protected（受保护）、uncertain（不确定）；规则不能发明新类别。"
+        case .unknownInstallationKind:
+            return "可用的安装路径种类只有 appBundle（App 包）与 executable（可执行文件）。"
         case .unreadableSource:
             return "确认该路径是一个可读的普通文件。"
         case .malformedJSON:

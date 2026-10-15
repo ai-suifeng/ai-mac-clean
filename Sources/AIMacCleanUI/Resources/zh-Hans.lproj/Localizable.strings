@@ -50,8 +50,8 @@
 /* MARK: - 信号与降权 */
 "discovery.signal.structural" = "结构指纹：%@";
 "discovery.signal.name" = "名称命中（只用于排序）：%@";
-"discovery.signal.application" = "同名应用：%@";
-"discovery.signal.command" = "PATH 中的命令：%@";
+"discovery.signal.application" = "安装位置（App 包）：%@";
+"discovery.signal.command" = "安装位置（命令）：%@";
 "discovery.signal.contentFeature" = "会话文件字段：%@";
 "discovery.demotion.negativeName" = "命中负向名单 %@，已降权并标为疑似";
 "discovery.demotion.missingFingerprint" = "没有命中任何结构特征";

@@ -2,10 +2,11 @@ import Foundation
 import XCTest
 
 import AIMacCleanDomain
+import AIMacCleanRules
 
-/// issue #16 的生产接线：规则目录 → 规则集准入 → 外部佐证采集 → 浅扫。
+/// issue #16 的生产接线：规则目录 → 规则集准入 → 浅扫（安装佐证由规则声明驱动，issue #19）。
 ///
-/// 全部输入（主目录、规则目录、词表、应用目录、PATH）都指向临时目录：
+/// 全部输入（主目录、规则目录、词表）都指向临时目录或随包分发的规则资源：
 /// 这一层测试只证明**接线顺序**正确，绝不碰真实数据目录（PRD §13 第 3 条）。
 final class DiscoveryServiceTests: XCTestCase {
 
@@ -69,41 +70,31 @@ final class DiscoveryServiceTests: XCTestCase {
         XCTAssertEqual(run.result.candidates, [])
     }
 
-    // MARK: - 外部佐证必须真的被采集（User Story 10）
+    // MARK: - 安装佐证由规则声明驱动（issue #19；User Story 10）
 
-    func test同名应用与PATH命令被采集为外部佐证因此判为高置信度() throws {
-        let ruleDirectory = try writeRules([RuleFixtures.claudeCodeJSON])
-        // 文件头不带规则声明的字段特征：这一档只可能由**采集到的** App / 命令撑起来。
+    func test规则声明的安装路径存在时判为高置信度() throws {
+        // 文件头不带规则声明的字段特征：这一档只可能由**安装佐证**撑起来。
         try home.makeFile(
             ".claude/projects/-Users-xiaowei-amc-wt-16/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
             contents: "{\"note\":\"没有规则声明的字段特征\"}\n"
         )
-        try home.writeFile("Applications/Claude.app/Contents/Info.plist", contents: "<plist/>")
-        let binDirectory = try home.home.makeDirectory("bin")
-        try writeExecutable(named: "claude", in: binDirectory)
+        // 这条路径来自规则文件（claude-code.json 声明的 `~/.claude/local/claude`），
+        // 不是应用去 `/Applications` 或 PATH 里翻出来的。
+        try home.writeFile(".claude/local/claude", contents: "#!/bin/sh\n")
 
         let run = DiscoveryService(
             configuration: .init(
                 homeDirectory: home.homePath,
-                ruleDirectory: ruleDirectory,
-                applicationDirectories: [home.homePath + "/Applications"],
-                commandSearchPaths: [binDirectory.path]
+                ruleDirectory: try XCTUnwrap(BuiltInRuleResources.directory)
             )
         ).run()
 
-        let candidate = try XCTUnwrap(run.result.candidates.first)
-        XCTAssertEqual(
-            candidate.confidence,
-            .high,
-            "同名 App 与 PATH 命令都必须真的被采集，否则「高置信度」永远不会出现"
-        )
-        XCTAssertEqual(
-            candidate.signals.externalCorroborations,
-            [.application("Claude"), .command("claude")]
-        )
+        let candidate = try XCTUnwrap(run.result.candidates.first { $0.ruleIdentifier == "claude-code" })
+        XCTAssertEqual(candidate.confidence, .high, "规则声明的安装路径存在就该拿到「高」")
+        XCTAssertEqual(candidate.signals.externalCorroborations, [.command("claude")])
     }
 
-    func test没有佐证来源时只按结构指纹判为中置信度() throws {
+    func test没有安装声明也没有内容特征时只按结构指纹判为中置信度() throws {
         let ruleDirectory = try writeRules([RuleFixtures.claudeCodeJSON])
         try home.makeFile(
             ".claude/projects/-Users-xiaowei-amc-wt-16/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl",
@@ -113,9 +104,7 @@ final class DiscoveryServiceTests: XCTestCase {
         let run = DiscoveryService(
             configuration: .init(
                 homeDirectory: home.homePath,
-                ruleDirectory: ruleDirectory,
-                applicationDirectories: [],
-                commandSearchPaths: []
+                ruleDirectory: ruleDirectory
             )
         ).run()
 
@@ -235,21 +224,27 @@ final class DiscoveryServiceTests: XCTestCase {
         XCTAssertTrue(candidate.isSuspicious)
     }
 
-    // MARK: - 标准入口的接线（不跑真实扫描，只看配置）
+    // MARK: - 标准入口的接线（issue #19：不再读 PATH）
 
-    func test标准入口指向系统应用目录与PATH() {
+    /// **标准入口不再读 PATH**，配置里只剩主目录、规则目录与词表。
+    ///
+    /// 对比全部字段的相等性顺带证明：`Configuration` 上没有藏起来的
+    /// 「应用目录 / 命令搜索路径」派生成员——那两个字段已经从类型上删掉了。
+    func test标准入口的配置只剩主目录规则目录与词表() {
         let service = DiscoveryService.standard(
             homeDirectory: "/Users/example",
             ruleDirectory: nil,
-            hintsFileURL: nil,
-            environment: ["PATH": "/usr/local/bin:/opt/homebrew/bin"]
+            hintsFileURL: nil
         )
 
         XCTAssertEqual(
-            service.configuration.applicationDirectories,
-            ["/Applications", "/Users/example/Applications"]
+            service.configuration,
+            DiscoveryService.Configuration(
+                homeDirectory: "/Users/example",
+                ruleDirectory: nil,
+                hintsFileURL: nil
+            )
         )
-        XCTAssertEqual(service.configuration.commandSearchPaths, ["/usr/local/bin", "/opt/homebrew/bin"])
     }
 
     // MARK: - 辅助
@@ -269,11 +264,5 @@ final class DiscoveryServiceTests: XCTestCase {
             try Data(json.utf8).write(to: file, options: .atomic)
         }
         return directory
-    }
-
-    private func writeExecutable(named name: String, in directory: URL) throws {
-        let url = directory.appendingPathComponent(name, isDirectory: false)
-        try Data("#!/bin/sh\n".utf8).write(to: url)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
     }
 }

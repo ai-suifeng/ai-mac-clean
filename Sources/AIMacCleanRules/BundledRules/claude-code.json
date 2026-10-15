@@ -5,6 +5,10 @@
   "roots": [
     { "path": "~/.claude", "role": "toolRoot" }
   ],
+  "installations": [
+    { "path": "~/.claude/local/claude", "kind": "executable" },
+    { "path": "~/.local/bin/claude", "kind": "executable" }
+  ],
   "structuralFingerprint": {
     "sessionFilePatterns": [
       "projects/<encodedPath>/<uuid>.jsonl",

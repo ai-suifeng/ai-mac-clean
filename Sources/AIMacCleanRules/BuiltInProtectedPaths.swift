@@ -229,9 +229,15 @@ public enum BuiltInProtectedPaths {
     public static func isProtected(
         _ path: String,
         underToolRoot toolRoot: String,
-        homeDirectory: String
+        homeDirectory: String,
+        listing: any ProtectedPathDirectoryListing = RealProtectedPathDirectoryListing()
     ) -> Bool {
-        protection(forPath: path, underToolRoot: toolRoot, homeDirectory: homeDirectory) != nil
+        protection(
+            forPath: path,
+            underToolRoot: toolRoot,
+            homeDirectory: homeDirectory,
+            listing: listing
+        ) != nil
     }
 
     /// 某路径命中的内置受保护条目；未命中返回 `nil`。
@@ -239,12 +245,16 @@ public enum BuiltInProtectedPaths {
     /// `homeDirectory` 由调用方显式传入，本类型不读 `NSHomeDirectory()`：
     /// 测试才能在临时目录上跑，本层也不会在隐式依赖真实用户主目录的情况下做安全判定。
     ///
+    /// `listing` 是通配展开读磁盘的那一层（issue #19）。默认真实文件系统；
+    /// 注入记录器后可以断言「这次判定列举了哪些目录」，而**主目录一次都不该出现**。
+    ///
     /// 判定**不做任何缓存**：宁可每次重算，也不因缓存过期漏掉一个刚出现的符号链接——
     /// 漏判的后果是动了凭证，而多算一次的开销只是多几次目录列举。
     public static func protection(
         forPath path: String,
         underToolRoot toolRoot: String,
-        homeDirectory: String
+        homeDirectory: String,
+        listing: any ProtectedPathDirectoryListing = RealProtectedPathDirectoryListing()
     ) -> ProtectedMatch? {
         let normalizedPath = ProtectedPathMath.normalize(path)
         let normalizedRoot = ProtectedPathMath.normalize(toolRoot)
@@ -285,7 +295,12 @@ public enum BuiltInProtectedPaths {
         }
 
         // 6. 链接的真实目标落在某个内置受保护目录之下。
-        if let rule = protectedDirectoryRule(containing: realPath, homeDirectory: realHome) {
+        //
+        // 展开根用**调用方给的**主目录形态（`normalizedHome`），不用解析过符号链接的
+        // `realHome`：这一步的产物要拿去做真实目标比较（下面每个目录都会
+        // `resolvingSymlinks`），因此解析与否不影响判定；用调用方的形态能让「访问了哪些
+        // 路径」与调用方传进来的主目录保持一致，不至于凭空多出一个 `/private/var` 前缀。
+        if let rule = protectedDirectoryRule(containing: realPath, homeDirectory: normalizedHome, listing: listing) {
             return ProtectedMatch(
                 ruleIdentifier: rule.identifier,
                 scope: rule.scope,
@@ -385,17 +400,30 @@ public enum BuiltInProtectedPaths {
 
     /// 判断真实路径是否落在某个内置受保护目录之下。
     ///
+    /// ## 只展开**规则声明的工具根**（issue #19）
+    ///
     /// 目录条目按其通配符模式在工具根下展开实际目录，再逐个解析符号链接，
-    /// 因此 `~/.codex/skills` → `~/.agents/skills` 这种链接会让真实目标本身受保护。
-    private static func protectedDirectoryRule(containing realPath: String, homeDirectory: String) -> BuiltInProtectedRule? {
-        var roots: [BuiltInProtectedScope: String] = [.homeDirectory: homeDirectory]
+    /// 因此 `~/.codex/skills` → `~/.agents/skills` 这种链接会让真实目标本身受保护
+    /// （PRD §14.5、验收 A3 / A8）。
+    ///
+    /// 主目录作用域的目录条目（`.agents/skills*`）**不参与展开**：它们由
+    /// `protection(...)` 第 3 步按「主目录 + 相对路径」的直接模式匹配判定，同样不需要
+    /// 列举。旧实现把 `homeDirectory` 也当成一个展开根，于是**每一次受保护判定**
+    /// 都会把用户主目录列一遍——那是本票要清掉的第二个通用位置扫描。
+    private static func protectedDirectoryRule(
+        containing realPath: String,
+        homeDirectory: String,
+        listing: any ProtectedPathDirectoryListing
+    ) -> BuiltInProtectedRule? {
+        // 展开根只有工具根：`rootRelativePaths` 是编译进二进制的已知工具位置清单。
+        var roots: [BuiltInProtectedScope: String] = [:]
         for (identifier, relativeRoot) in rootRelativePaths {
             roots[.toolRoot(identifier)] = ProtectedPathMath.normalize(homeDirectory + "/" + relativeRoot)
         }
 
         for rule in rules where rule.kind == .directory {
             guard let root = roots[rule.scope] else { continue }
-            for directory in existingDirectories(matching: rule.pattern, in: root) {
+            for directory in existingDirectories(matching: rule.pattern, in: root, listing: listing) {
                 let real = ProtectedPathMath.resolvingSymlinks(directory)
                 if realPath == real || realPath.hasPrefix(real + "/") {
                     return rule
@@ -406,21 +434,25 @@ public enum BuiltInProtectedPaths {
     }
 
     /// 列出 `root` 下匹配模式的实际目录（含通配符与多段前缀展开）。
-    private static func existingDirectories(matching pattern: String, in root: String) -> [String] {
+    ///
+    /// **展开绝不越过 `root`**：中途遇到符号链接就停下，既不解析它，也不去它指向的位置
+    /// 列举。`root` 一定是规则声明的工具根（见调用点），因此这条展开碰不到规则之外的
+    /// 任何位置；匹配到的符号链接本身仍作为结果返回，由调用方按真实目标判定
+    /// （`~/.codex/skills` → `~/.agents/skills` 的形态就靠这一步）。
+    private static func existingDirectories(
+        matching pattern: String,
+        in root: String,
+        listing: any ProtectedPathDirectoryListing
+    ) -> [String] {
         var current = [root]
 
         for component in ProtectedPathMath.components(of: pattern) {
             var next: [String] = []
             for directory in current {
-                if ProtectedPathMath.isSymbolicLink(directory) {
-                    let real = ProtectedPathMath.resolvingSymlinks(directory)
-                    if ProtectedPathMath.matches(pattern: component, component: lastComponent(of: real) ?? "") {
-                        next.append(real)
-                    }
-                    continue
-                }
-
-                guard let entries = try? FileManager.default.contentsOfDirectory(atPath: directory) else { continue }
+                // 不跟随符号链接：它指向哪里不关展开的事（User Story 12）。
+                guard !ProtectedPathMath.isSymbolicLink(directory),
+                      let entries = listing.entryNames(inDirectory: directory)
+                else { continue }
                 for entry in entries where ProtectedPathMath.matches(pattern: component, component: entry) {
                     next.append(directory == "/" ? "/\(entry)" : directory + "/\(entry)")
                 }
@@ -429,9 +461,5 @@ public enum BuiltInProtectedPaths {
             if current.isEmpty { break }
         }
         return current
-    }
-
-    private static func lastComponent(of path: String) -> String? {
-        ProtectedPathMath.components(of: path).last
     }
 }

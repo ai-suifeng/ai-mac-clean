@@ -5,6 +5,10 @@
   "roots": [
     { "path": "~/.codex", "role": "toolRoot" }
   ],
+  "installations": [
+    { "path": "/opt/homebrew/bin/codex", "kind": "executable" },
+    { "path": "/usr/local/bin/codex", "kind": "executable" }
+  ],
   "structuralFingerprint": {
     "sessionFilePatterns": [
       "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl",

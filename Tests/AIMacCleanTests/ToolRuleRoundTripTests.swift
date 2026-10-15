@@ -31,6 +31,7 @@ final class ToolRuleRoundTripTests: XCTestCase {
         XCTAssertEqual(restored.classification, original.classification)
         XCTAssertEqual(restored.selfCompressed, original.selfCompressed)
         XCTAssertEqual(restored.sessionFileNaming, original.sessionFileNaming)
+        XCTAssertEqual(restored.installations, original.installations)
     }
 
     func test序列化是确定性的() throws {

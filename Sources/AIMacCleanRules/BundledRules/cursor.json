@@ -6,6 +6,10 @@
     { "path": "~/.cursor", "role": "toolRoot" },
     { "path": "~/Library/Application Support/Cursor", "role": "displayOnly" }
   ],
+  "installations": [
+    { "path": "/Applications/Cursor.app", "kind": "appBundle" },
+    { "path": "~/Applications/Cursor.app", "kind": "appBundle" }
+  ],
   "structuralFingerprint": {
     "sessionFilePatterns": [
       "projects/<encodedPath>/agent-transcripts/<uuid>/<uuid>.jsonl",

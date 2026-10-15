@@ -46,23 +46,24 @@ import AIMacCleanRules
 ///    自带压缩的文件（`.zst` / `.zstd` …）只按扩展名识别，不解压（User Story 11、24）。
 /// 6. **安装检测不是硬过滤器**：某个工具没装不影响它的数据目录被发现——卸载了工具、
 ///    磁盘上会话还在，正是这个产品最该帮用户发现的场景。安装证据只决定「高 / 中」
-///    与同档内的先后（issue #18；见 `InstallationDetection`）。
+///    与同档内的先后（issue #18）。
+/// 7. **安装检测只 stat 规则声明过的路径**（issue #19）：对每条规则的
+///    `installations` 逐条判存在，不列举 `/Applications`、`~/Applications`、PATH 的任何目录，
+///    也不列举主目录。一次发现对磁盘的访问只落在「规则声明的工具根内部」与
+///    「规则声明的安装路径本身」上。
 public struct ToolDiscoverer {
 
     private let rules: [ToolRule]
     private let hints: DiscoveryHints
     private let externalEvidence: ExternalEvidence
-    private let installation: InstallationDetection
     private let fileSystem: any DiscoveryFileSystem
     private let homeDirectory: String
 
     /// - Parameters:
     ///   - rules: **已准入**的规则集（`RuleSetAdmission.admit(...).usableRules`）。
     ///   - hints: 名称关键词与负向名单。默认空：没有词表就只是不排序、不降权。
-    ///   - externalEvidence: 调用方**已经采集好**的外部佐证。默认空。
-    ///   - installation: 安装检测的采集位置（`/Applications`、`~/Applications`、PATH）。
-    ///     给了它，发现器就在 `discover()` 里**先采集、后打分**（issue #18）。
-    ///     与 `externalEvidence` 是同一个值的两种来源，两者都算数（取并集）。
+    ///   - externalEvidence: 调用方**已经拿到的**外部佐证（纯值，不触发任何磁盘访问）。默认空。
+    ///     生产接线不注入它：安装佐证由规则声明的安装路径驱动（issue #19）。
     ///   - fileSystem: 浅扫读磁盘的那一层（issue #18）。默认真实文件系统；
     ///     测试注入记录器后可以逐条断言「一次发现访问了哪些路径」。
     ///   - homeDirectory: 把规则里的 `~/` 展开成绝对路径用的主目录，由调用方给出。
@@ -70,23 +71,22 @@ public struct ToolDiscoverer {
         rules: [ToolRule],
         hints: DiscoveryHints = .none,
         externalEvidence: ExternalEvidence = .none,
-        installation: InstallationDetection = .none,
         fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem(),
         homeDirectory: String
     ) {
         self.rules = rules
         self.hints = hints
         self.externalEvidence = externalEvidence
-        self.installation = installation
         self.fileSystem = fileSystem
         self.homeDirectory = homeDirectory
     }
 
     /// 规则驱动浅扫一次（issue #18）。
     ///
-    /// 步骤只有两步，且顺序本身就是纪律：
-    /// 1. 对规则声明的每一个工具根做一次存在性与符号链接判断（不列举父目录）。
-    /// 2. 存在的那些，在其内部比对结构指纹，产出候选。
+    /// 步骤与顺序本身就是纪律：
+    /// 1. **安装检测先行**：对每条规则声明的安装路径逐条 `stat`（issue #19）。
+    /// 2. 对规则声明的每一个工具根做一次存在性与符号链接判断（不列举父目录）。
+    /// 3. 存在的那些，在其内部比对结构指纹，产出候选。
     ///
     /// 全程不碰任何规则没有声明的位置——这正是旧口径要去掉的那件事。
     public func discover() -> DiscoveryResult {
@@ -95,8 +95,8 @@ public struct ToolDiscoverer {
         let reader = ShallowDirectoryReader(fileSystem: fileSystem)
 
         // 安装检测**先于打分**：这批佐证决定了「高 / 中」，采集放在打分之后就没有意义了
-        // （User Story 10）。它与调用方注入的佐证取并集，两种来源都算数。
-        let evidence = externalEvidence.merging(installation.detect(fileSystem: fileSystem))
+        // （User Story 10）。它只 stat 规则声明过的路径（issue #19）。
+        let declaredInstallations = detectDeclaredInstallations()
 
         for path in declaredToolRootPaths() {
             // 声明路径本身不存在只是「这里没有可看的东西」（User Story 22），不算读不到；
@@ -104,7 +104,7 @@ public struct ToolDiscoverer {
             guard reader.isDirectory(path), !reader.isSymbolicLink(path) else { continue }
             guard let candidate = candidate(
                 forToolRootAt: path,
-                evidence: evidence,
+                declaredInstallations: declaredInstallations,
                 reader: reader,
                 unreadable: &unreadable
             ) else { continue }
@@ -117,13 +117,49 @@ public struct ToolDiscoverer {
         )
     }
 
+    /// **安装检测（声明驱动，issue #19）**：对每条规则的每条安装路径逐条 `stat`。
+    ///
+    /// 一次发现对磁盘的访问因此只与**声明的条数**成正比，与 `/Applications`、PATH、
+    /// 主目录里有多少东西无关。命中即产生安装佐证（App 包 → `.application`，
+    /// 可执行文件 → `.command`），喂给「高 / 中」与同档排序。
+    ///
+    /// 声明路径不存在只是「没有安装佐证」，不是错误，也不影响那个工具的数据目录被发现。
+    private func detectDeclaredInstallations() -> [String: [ExternalCorroboration]] {
+        var corroborationsByRule: [String: [ExternalCorroboration]] = [:]
+
+        for rule in rules {
+            var corroborations: [ExternalCorroboration] = []
+            for installation in rule.installations {
+                let path = resolvedDeclaredPath(installation.path)
+                guard fileSystem.attributes(ofItemAt: path) != nil,
+                      let name = installationName(of: path, kind: installation.kind)
+                else { continue }
+                corroborations.append(installation.kind == .appBundle ? .application(name) : .command(name))
+            }
+            if !corroborations.isEmpty {
+                corroborationsByRule[rule.id] = corroborations
+            }
+        }
+
+        return corroborationsByRule
+    }
+
+    /// 佐证里显示的名字：App 包去掉 `.app`，可执行文件取文件名。
+    private func installationName(of path: String, kind: InstallationKind) -> String? {
+        guard var name = path.split(separator: "/").last.map(String.init), !name.isEmpty else { return nil }
+        if kind == .appBundle, name.lowercased().hasSuffix(".app") {
+            name = String(name.dropLast(4))
+        }
+        return name.isEmpty ? nil : name
+    }
+
     /// 规则集里声明过的全部工具根目录的绝对路径（只认 `role == .toolRoot`）。
     private func declaredToolRootPaths() -> [String] {
         var seen: Set<String> = []
         var paths: [String] = []
         for rule in rules {
             for root in rule.roots where root.role == .toolRoot {
-                let path = resolvedRootPath(root.path)
+                let path = resolvedDeclaredPath(root.path)
                 if seen.insert(path).inserted { paths.append(path) }
             }
         }
@@ -138,7 +174,7 @@ public struct ToolDiscoverer {
     /// 名称关键词、负向名单、外部佐证都不参与「是否入列」这道判断。
     private func candidate(
         forToolRootAt path: String,
-        evidence: ExternalEvidence,
+        declaredInstallations: [String: [ExternalCorroboration]],
         reader: ShallowDirectoryReader,
         unreadable: inout [UnreadableDirectory]
     ) -> Candidate? {
@@ -152,12 +188,13 @@ public struct ToolDiscoverer {
         )
         unreadable.append(contentsOf: evaluated.unreadable)
 
-        // 两件不同的事，各用各的依据：
+        // 三件不同的事，各用各的依据：
         // - `nameMatches` 说的是「目录名命中了哪些关键词」——只反映名字，界面如实这么显示；
-        // - 外部佐证问的是「这台机器上装没装这个工具」，依据是**候选所属的规则**，
-        //   不是目录名碰巧命中了哪几个词。
+        // - 声明驱动安装佐证问的是「这个工具声明的安装位置在不在」——依据是**候选所属的规则**；
+        // - 注入的佐证是调用方已经确定的值（纯值匹配，不碰磁盘）。
         let nameMatches = matchedKeywords(ruleIdentifier: rule.id, of: path)
-        let corroborations = evidence.corroborations(forKeywords: corroborationKeywords(for: rule))
+        let corroborations = (declaredInstallations[rule.id] ?? [])
+            + externalEvidence.corroborations(forKeywords: corroborationKeywords(for: rule))
             + contentCorroborations(from: evaluated.evidence.contentFeatures)
 
         let signals = ConfirmationSignals(
@@ -200,7 +237,8 @@ public struct ToolDiscoverer {
             protection: BuiltInProtectedPaths.protection(
                 forPath: path,
                 underToolRoot: path,
-                homeDirectory: homeDirectory
+                homeDirectory: homeDirectory,
+                listing: ProtectedPathListing(fileSystem: fileSystem)
             )
         )
     }
@@ -211,24 +249,24 @@ public struct ToolDiscoverer {
     private func rule(declaringToolRootAt path: String) -> ToolRule? {
         rules.first { rule in
             rule.roots.contains { root in
-                root.role == .toolRoot && resolvedRootPath(root.path) == path
+                root.role == .toolRoot && resolvedDeclaredPath(root.path) == path
             }
         }
     }
 
-    /// 把规则里的 `~/…` 或绝对路径展开成绝对路径。
-    private func resolvedRootPath(_ declared: String) -> String {
+    /// 把规则里的 `~/…` 或绝对路径展开成绝对路径（工具根与安装路径共用一套写法）。
+    private func resolvedDeclaredPath(_ declared: String) -> String {
         let prefix = homeDirectory.hasSuffix("/") ? String(homeDirectory.dropLast()) : homeDirectory
         let expanded = declared.hasPrefix("~/") ? prefix + String(declared.dropFirst(1)) : declared
         return expanded.count > 1 && expanded.hasSuffix("/") ? String(expanded.dropLast()) : expanded
     }
 
-    /// 拿去找同名 App / PATH 命令的词：**候选所属规则**声明的关键词，加上它的展示名。
+    /// 拿去找**注入佐证**的词：候选所属规则声明的关键词，加上它的展示名。
     ///
-    /// 依据是规则而不是目录名。早先的实现把两件事混成一件：先筛出「目录名命中了哪几个
-    /// 关键词」，再用这些词去找外部佐证。词表是**用户可改的配置**，漏配关键词很正常——
-    /// 一旦漏配，装了 OpenCode 也佐证不了 `~/.local/share/opencode`，「结构指纹 + 外部佐证
-    /// = 高」这条就永远拿不到（User Story 10）。
+    /// 生产环境不再自己采集外部佐证（安装佐证由规则声明的安装路径驱动，issue #19），
+    /// 因此这段匹配只作用于调用方注入的纯值佐证。依据仍然是规则而不是目录名：
+    /// 早先的实现先筛出「目录名命中了哪几个关键词」，再用这些词去找外部佐证——
+    /// 词表是用户可改的配置，漏配关键词的时候整条佐证链就断了（User Story 10）。
     ///
     /// 展示名也参与匹配，因为它是规则自带的、不依赖用户词表的第二来源：
     /// `OpenCode` → `opencode`，`DeepSeek Harness` → `deepseek` / `harness`。
@@ -306,7 +344,7 @@ public struct ToolDiscoverer {
     /// 最后按路径排序保证结果可复现。
     ///
     /// 两把排序钥匙的权限边界不一样：
-    /// - **安装佐证**（同名 App / PATH 命令）是安装检测的产物，它决定「高 / 中」，
+    /// - **安装佐证**（规则声明的安装路径命中）是安装检测的产物，它决定「高 / 中」，
     ///   因此同档里也优先（issue #18：安装检测是发现入口与排序依据）。
     /// - **名称关键词**只影响顺序，不影响谁进了列表（User Story 9）。
     private func sorted(_ candidates: [Candidate]) -> [Candidate] {
@@ -330,6 +368,20 @@ public struct ToolDiscoverer {
             case .contentFeature: return false
             }
         }
+    }
+}
+
+/// 把受保护判定的目录列举接到发现器同一层 `DiscoveryFileSystem` 上（issue #19）。
+///
+/// 受保护判定要为受保护目录模式做通配展开，而展开是一次真实的目录列举。
+/// 接上这层之后，**一次发现做过的全部列举**（浅扫 + 受保护判定）都进同一份访问记录，
+/// 「有没有列举主目录」与「有没有碰规则外的位置」可以一起被断言，而不是各说各话。
+private struct ProtectedPathListing: ProtectedPathDirectoryListing {
+
+    let fileSystem: any DiscoveryFileSystem
+
+    func entryNames(inDirectory path: String) -> [String]? {
+        try? fileSystem.entryNames(inDirectory: path)
     }
 }
 
