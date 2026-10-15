@@ -237,7 +237,8 @@ public struct ToolDiscoverer {
             protection: BuiltInProtectedPaths.protection(
                 forPath: path,
                 underToolRoot: path,
-                homeDirectory: homeDirectory
+                homeDirectory: homeDirectory,
+                listing: ProtectedPathListing(fileSystem: fileSystem)
             )
         )
     }
@@ -367,6 +368,20 @@ public struct ToolDiscoverer {
             case .contentFeature: return false
             }
         }
+    }
+}
+
+/// 把受保护判定的目录列举接到发现器同一层 `DiscoveryFileSystem` 上（issue #19）。
+///
+/// 受保护判定要为受保护目录模式做通配展开，而展开是一次真实的目录列举。
+/// 接上这层之后，**一次发现做过的全部列举**（浅扫 + 受保护判定）都进同一份访问记录，
+/// 「有没有列举主目录」与「有没有碰规则外的位置」可以一起被断言，而不是各说各话。
+private struct ProtectedPathListing: ProtectedPathDirectoryListing {
+
+    let fileSystem: any DiscoveryFileSystem
+
+    func entryNames(inDirectory path: String) -> [String]? {
+        try? fileSystem.entryNames(inDirectory: path)
     }
 }
 
