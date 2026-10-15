@@ -9,7 +9,7 @@ public struct WorkspaceShellView: View {
     @State private var model: WorkspaceShellModel
     private let discoveryPageModel: DiscoveryPageModel
 
-    /// 用生产接线（真实规则目录、`/Applications`、PATH 与本机确认存储）构造外壳。
+    /// 用生产接线（真实规则目录与本机确认存储）构造外壳。
     public init() {
         self.init(discoveryPageModel: .standard())
     }

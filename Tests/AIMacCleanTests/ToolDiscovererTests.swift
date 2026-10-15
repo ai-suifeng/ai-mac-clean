@@ -639,6 +639,9 @@ final class ToolDiscovererTests: XCTestCase {
                 negativeNamePatterns: ["*bak*", ".claude-*", ".codexbar"]
             ),
             externalEvidence: ExternalEvidence(applicationNames: ["Claude"], commandNames: ["codex"]),
+            // 出厂规则里有绝对安装路径（`/Applications/Cursor.app` 等）：把本机装了什么
+            // 关在夹具之外，这条用例才只由夹具决定（issue #19）。
+            fileSystem: ConfinedDiscoveryFileSystem(confinedTo: fixture.homePath),
             homeDirectory: fixture.homePath
         ).discover()
 
@@ -721,29 +724,43 @@ final class ToolDiscovererTests: XCTestCase {
         )
     }
 
-    func test外部佐证从应用目录与命令搜索路径采集() throws {
+    /// 声明的安装路径 → 佐证名字：App 包取去掉 `.app` 的名字，可执行文件取文件名（issue #19）。
+    ///
+    /// 旧实现靠列举应用目录 / PATH 目录再按名字匹配；现在佐证只来自规则声明，
+    /// 因此名字直接由声明路径得来，不需要（也不允许）任何目录列举。
+    func test声明的安装路径产生对应的应用或命令佐证() throws {
         let fixture = try DiscoveryFixture()
         defer { fixture.home.remove() }
 
-        let applications = try fixture.makeDirectory("Applications")
-        try fixture.makeDirectory("Applications/Claude.app")
-        try fixture.makeDirectory("Applications/Codex.app")
-        let commands = try fixture.makeDirectory("bin")
-        try fixture.writeFile("bin/claude", contents: "#!/bin/sh\n")
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: commands + "/claude")
-        // 不可执行的文件不是命令。
-        try fixture.writeFile("bin/codex", contents: "说明文档\n")
+        let rule = """
+        {
+          "schemaVersion": 1,
+          "id": "fixture-tool",
+          "displayName": "Fixture Tool",
+          "roots": [{ "path": "~/.fixture-tool", "role": "toolRoot" }],
+          "installations": [
+            { "path": "~/Applications/Fixture Tool.app", "kind": "appBundle" },
+            { "path": "~/bin/fixture-tool", "kind": "executable" }
+          ],
+          "structuralFingerprint": { "sessionDirectoryShapes": ["sessions"] }
+        }
+        """
+        try fixture.makeDirectory(".fixture-tool/sessions")
+        try fixture.makeDirectory("Applications/Fixture Tool.app")
+        try fixture.writeFile("bin/fixture-tool", contents: "#!/bin/sh\n")
 
-        let evidence = ExternalEvidenceCollector.detect(
-            applicationDirectories: [applications],
-            commandSearchPaths: [commands]
-        )
+        let result = ToolDiscoverer(
+            rules: try admittedRules([rule]),
+            homeDirectory: fixture.homePath
+        ).discover()
 
-        XCTAssertEqual(evidence.applicationNames, ["Claude", "Codex"])
+        let candidate = try XCTUnwrap(result.candidates.first)
         XCTAssertEqual(
-            evidence.commandNames, ["claude"],
-            "PATH 里不可执行的文件不算同名命令（实测 zstd 也不在 /usr/bin）"
+            candidate.signals.externalCorroborations,
+            [.application("Fixture Tool"), .command("fixture-tool")],
+            "声明顺序就是佐证顺序，名字由声明路径得来"
         )
+        XCTAssertEqual(candidate.confidence, .high)
     }
 
     // MARK: - 切片 9：与确认存储对接、受保护判定按链接真实目标

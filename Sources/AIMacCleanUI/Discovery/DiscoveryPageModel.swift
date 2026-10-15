@@ -57,7 +57,7 @@ public final class DiscoveryPageModel: ObservableObject {
         self.state = DiscoveryPageState()
     }
 
-    /// 应用启动时用的入口：真实规则目录、`/Applications`、PATH 与本机确认存储。
+    /// 应用启动时用的入口：真实规则目录与本机确认存储（不读 PATH，不列举通用位置）。
     public static func standard(
         store: ConfirmationStore = JSONConfirmationStore.standard(),
         settings: ConfirmationSettings? = ConfirmationSettings.standard(),

@@ -54,7 +54,7 @@ extension DiscoveryIssue: CustomStringConvertible {
 /// 发现管线的运行入口（issue #16 的接线处）。
 ///
 /// 单独成协议是为了让**界面状态机**不依赖文件系统：视图模型的测试给一个固定结果，
-/// 生产接线（真实规则目录、`/Applications`、PATH）由 `DiscoveryService` 提供。
+/// 生产接线（真实规则目录与本机确认存储）由 `DiscoveryService` 提供。
 /// spec #7 没有为发现管线之外的接线单开 seam，因此这里不开测试 seam，
 /// 只保证两者的形状一致。
 public protocol DiscoverySource {
@@ -65,14 +65,17 @@ public protocol DiscoverySource {
 ///
 /// 一次 `run()` 依次做两件事，顺序本身就是纪律：
 /// 1. **加载内置规则** → 规则集准入 → 可用规则集（保护单调性在这一步生效）。
-/// 2. **发现**：安装检测（同名 App / `~/Applications`、PATH 中的命令）作为**入口**
+/// 2. **发现**：安装检测（对每条规则声明的安装路径逐条 `stat`，issue #19）作为**入口**
 ///    先执行，随后规则驱动的浅扫比对结构指纹并打分。
 ///
 /// 安装检测之所以必须发生在打分之前：它决定「高 / 中」，采集放在打分之后就没有意义了
 /// （User Story 10）。它**不是过滤器**——某个工具没装，不影响它的数据目录被发现
 /// （issue #18）。
 ///
-/// 全部输入（主目录、规则目录、词表、应用目录、PATH）都由调用方注入——
+/// **本接线不读 `PATH`，也不列举任何通用位置**（issue #19）：装了哪些工具由规则文件
+/// 声明，代码里没有 `/Applications`、`~/Applications` 这类位置，也没有环境变量入口。
+///
+/// 全部输入（主目录、规则目录、词表）都由调用方注入——
 /// 测试才能全部跑在临时目录上（PRD §13 第 3 条）。
 public struct DiscoveryService: DiscoverySource {
 
@@ -91,26 +94,16 @@ public struct DiscoveryService: DiscoverySource {
         /// 随版本发布的默认词表。用户没写自己的词表时用它。
         public var bundledHintsURL: URL?
 
-        /// 采集同名 App 的目录（`/Applications`、`~/Applications`）。
-        public var applicationDirectories: [String]
-
-        /// 采集 PATH 命令的目录。
-        public var commandSearchPaths: [String]
-
         public init(
             homeDirectory: String,
             ruleDirectory: URL?,
             hintsFileURL: URL? = nil,
-            bundledHintsURL: URL? = BuiltInDiscoveryHints.url,
-            applicationDirectories: [String] = [],
-            commandSearchPaths: [String] = []
+            bundledHintsURL: URL? = BuiltInDiscoveryHints.url
         ) {
             self.homeDirectory = homeDirectory
             self.ruleDirectory = ruleDirectory
             self.hintsFileURL = hintsFileURL
             self.bundledHintsURL = bundledHintsURL
-            self.applicationDirectories = applicationDirectories
-            self.commandSearchPaths = commandSearchPaths
         }
     }
 
@@ -130,7 +123,10 @@ public struct DiscoveryService: DiscoverySource {
         self.fileSystem = fileSystem
     }
 
-    /// 应用启动时用的入口：真实 `/Applications`、`~/Applications` 与 `PATH`。
+    /// 应用启动时用的入口：真实规则目录与本机词表。
+    ///
+    /// 这里**没有**应用目录 / PATH 参数，也不读环境变量（issue #19）：
+    /// 「装了哪些工具」由规则文件声明的安装路径回答，通用位置从代码里彻底下线。
     ///
     /// ## 打包注意（issue #15 记录的风险，此处是唯一一处需要留意的地方）
     ///
@@ -145,20 +141,15 @@ public struct DiscoveryService: DiscoverySource {
         homeDirectory: String = NSHomeDirectory(),
         ruleDirectory: URL? = BuiltInRuleResources.directory,
         hintsFileURL: URL? = defaultHintsFileURL(),
-        applicationDirectories: [String]? = nil,
-        commandSearchPaths: [String]? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem()
     ) -> DiscoveryService {
         DiscoveryService(
             configuration: Configuration(
                 homeDirectory: homeDirectory,
                 ruleDirectory: ruleDirectory,
-                hintsFileURL: hintsFileURL,
-                applicationDirectories: applicationDirectories
-                    ?? ["/Applications", homeDirectory + "/Applications"],
-                commandSearchPaths: commandSearchPaths
-                    ?? (environment["PATH"] ?? "").split(separator: ":").map(String.init)
-            )
+                hintsFileURL: hintsFileURL
+            ),
+            fileSystem: fileSystem
         )
     }
 
@@ -183,11 +174,6 @@ public struct DiscoveryService: DiscoverySource {
         let discoverer = ToolDiscoverer(
             rules: rules,
             hints: hints,
-            // 采集位置给进去，采集与打分的前后顺序由发现器保证（issue #18）。
-            installation: InstallationDetection(
-                applicationDirectories: configuration.applicationDirectories,
-                commandSearchPaths: configuration.commandSearchPaths
-            ),
             fileSystem: fileSystem,
             homeDirectory: configuration.homeDirectory
         )

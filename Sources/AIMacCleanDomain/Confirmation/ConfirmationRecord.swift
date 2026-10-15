@@ -14,11 +14,12 @@ public enum ToolDecision: String, Codable, Equatable, Sendable, CaseIterable {
 /// 一条**外部佐证**：除结构指纹之外，让候选更可信的旁证（PRD §4.3「关联检测」「内容特征」）。
 ///
 /// 分三类，是为了让记录里的信号在几个月后仍然可读（User Story 19）：
-/// 知道「因为 `/Applications/Claude.app` 存在」和「因为 PATH 里有 claude 命令」是两回事。
+/// 知道「因为规则声明的 `Cursor.app` 装在这儿」和「因为规则声明的 `codex` 命令在」
+/// 是两回事。
 public enum ExternalCorroboration: Equatable, Sendable {
-    /// `/Applications` 或 `~/Applications` 下的同名 App。
+    /// 规则声明的 App 包存在（`/Applications/Cursor.app` → `Cursor`）。
     case application(String)
-    /// PATH 中的同名命令。
+    /// 规则声明的可执行文件存在（`/opt/homebrew/bin/codex` → `codex`）。
     case command(String)
     /// 会话文件开头的字段特征（只读文件头少量内容）。
     case contentFeature(String)
