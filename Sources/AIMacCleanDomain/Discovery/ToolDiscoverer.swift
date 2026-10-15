@@ -3,10 +3,24 @@ import Foundation
 import AIMacCleanCore
 import AIMacCleanRules
 
-/// 浅扫发现器（Seam 1；issue #12 / spec #7 §发现管线）。
+/// 浅扫发现器（Seam 1；issue #12 建立、issue #18 改为**规则驱动**）。
 ///
-/// 输入：若干**扫描根**（注入，测试用临时目录树）与一份**已验证可用的规则集**
-/// （`RuleSetAdmission` 的 `usableRules`）。输出：候选列表。
+/// 输入：一份**已验证可用的规则集**（`RuleSetAdmission` 的 `usableRules`）与主目录。
+/// 输出：候选列表。
+///
+/// ## 扫描口径：范围完全由规则文件决定（issue #18）
+///
+/// 浅扫**不枚举任何通用位置**。它只看规则声明的工具根：对每一个声明路径做一次
+/// 存在性与「是不是符号链接」的判断，存在就在它内部比对结构指纹。
+///
+/// 换掉之前的原因是可量化的：旧口径按 PRD §4.2 那份通用清单把 `~`、`~/.cache`、
+/// `~/Library/Containers` 等九个位置逐个列举一遍，本机合计约 1,400 个一级目录
+/// （`~/Library/Containers` 一处就 728 个），而这层枚举**几乎不产生任何候选**——
+/// 准入要求「命中规则声明的工具根」，而那些目录本来就没有规则声明它们。
+/// 为了找 5 个已知工具扫了 1,400 个无关目录，观感上也让产品退化成一个通用硬盘清理器。
+///
+/// **新增一个工具 = 新增一个规则文件，代码零改动**（User Story 20 的意图
+/// 从此成为扫描口径本身，而不只是实现上的方便）。
 ///
 /// ## 不变式
 ///
@@ -17,115 +31,81 @@ import AIMacCleanRules
 ///    **根本不会出现在候选列表里**。
 /// 2. **不跟随符号链接**：遍历与指纹匹配都不解析符号链接（User Story 12）。
 ///    候选的受保护判定另按链接真实目标进行（issue #9）。
-/// 3. **浅扫**：只看扫描根的一级子目录，不递归计算体积（User Story 2、44）。
-///    比对结构指纹时的下潜有层数与条目数上限。
-///    **已知偏差（刻意保留，PRD §13.1 要求把偏差记下来）**：spec / US2 写的是
-///    「浅扫只遍历一级子目录」，但 `discover(scanRoots:)` 还会**补一次**规则声明的工具根，
-///    且不限制它在扫描根下的深度。原因有两条，缺一不可：
-///    - DeepSeek Harness 的真实工具根是 `~/Library/Application Support/deepseek-harness-desktop/harness-home`，
-///      是那一层目录的**孙子**（PRD §14.5）。只扫一层就永远发现不了它，
-///      而「发现非标准位置」是 User Story 7 的硬要求。
-///    - OpenCode 的数据根在 `~/.local/share/opencode`（PRD §5.4），同样不是一层。
-///    补漏仍然**只做一次存在性判断**（不递归、不列举），因此递归成本不变；准入口径也不变：
-///    照样要过结构指纹才能拿到「中」以上，声明在非隐藏位置的规则也不因此被捡起来。
+/// 3. **浅扫、不递归算大小**：工具根只做存在性判断；比对结构指纹时的下潜有层数与
+///    条目数上限（User Story 2、44）。
+///    **与 spec / US2「只遍历一级子目录」不再是偏差**：规则驱动的口径下，
+///    「一级」这个说法本就没有意义——DeepSeek Harness 的真实工具根
+///    `~/Library/Application Support/deepseek-harness-desktop/harness-home` 是那一层的
+///    **孙子**（PRD §14.5），OpenCode 的数据根在 `~/.local/share/opencode`（PRD §5.4）。
+///    这两条能被发现不是「多下潜了几层」，而是**规则直接声明了那个路径**。
+///    代价边界有断言钉着：浅扫不会为了找一个声明路径去枚举它缺失的父目录
+///    （见 `RuleDrivenScanTests` 的对照实验）。
 /// 4. **错误按目录隔离**：读不到一个目录只跳过它自己，并在结果里说明；
 ///    整体扫描不失败，空结果是成功（User Story 13、14）。
 /// 5. **只读元数据与文件头**：文件内容最多读 `headerByteLimit` 字节，且只读开头；
 ///    自带压缩的文件（`.zst` / `.zstd` …）只按扩展名识别，不解压（User Story 11、24）。
+/// 6. **安装检测不是硬过滤器**：某个工具没装不影响它的数据目录被发现——卸载了工具、
+///    磁盘上会话还在，正是这个产品最该帮用户发现的场景。安装证据只决定「高 / 中」
+///    与同档内的先后（issue #18；见 `InstallationDetection`）。
 public struct ToolDiscoverer {
 
     private let rules: [ToolRule]
     private let hints: DiscoveryHints
     private let externalEvidence: ExternalEvidence
+    private let installation: InstallationDetection
+    private let fileSystem: any DiscoveryFileSystem
     private let homeDirectory: String
 
     /// - Parameters:
     ///   - rules: **已准入**的规则集（`RuleSetAdmission.admit(...).usableRules`）。
     ///   - hints: 名称关键词与负向名单。默认空：没有词表就只是不排序、不降权。
-    ///   - externalEvidence: 外部佐证（同名 App / PATH 命令）。默认空。
+    ///   - externalEvidence: 调用方**已经采集好**的外部佐证。默认空。
+    ///   - installation: 安装检测的采集位置（`/Applications`、`~/Applications`、PATH）。
+    ///     给了它，发现器就在 `discover()` 里**先采集、后打分**（issue #18）。
+    ///     与 `externalEvidence` 是同一个值的两种来源，两者都算数（取并集）。
+    ///   - fileSystem: 浅扫读磁盘的那一层（issue #18）。默认真实文件系统；
+    ///     测试注入记录器后可以逐条断言「一次发现访问了哪些路径」。
     ///   - homeDirectory: 把规则里的 `~/` 展开成绝对路径用的主目录，由调用方给出。
     public init(
         rules: [ToolRule],
         hints: DiscoveryHints = .none,
         externalEvidence: ExternalEvidence = .none,
+        installation: InstallationDetection = .none,
+        fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem(),
         homeDirectory: String
     ) {
         self.rules = rules
         self.hints = hints
         self.externalEvidence = externalEvidence
+        self.installation = installation
+        self.fileSystem = fileSystem
         self.homeDirectory = homeDirectory
     }
 
-    /// 按 PRD §4.2 的标准扫描根浅扫一次。
+    /// 规则驱动浅扫一次（issue #18）。
+    ///
+    /// 步骤只有两步，且顺序本身就是纪律：
+    /// 1. 对规则声明的每一个工具根做一次存在性与符号链接判断（不列举父目录）。
+    /// 2. 存在的那些，在其内部比对结构指纹，产出候选。
+    ///
+    /// 全程不碰任何规则没有声明的位置——这正是旧口径要去掉的那件事。
     public func discover() -> DiscoveryResult {
-        discover(scanRoots: ScanRoot.standard(forHomeDirectory: homeDirectory))
-    }
-
-    /// 按给定的扫描根浅扫一次。
-    ///
-    /// ## 与「只遍历一级子目录」的偏差
-    ///
-    /// spec #7 / US2 描述的是「浅扫只遍历一级子目录」。本方法在**这一层之外还补一次**：
-    /// 规则声明的每一个工具根目录，只要它确实存在、不是符号链接，且不违反扫描根的
-    /// 隐藏目录筛选口径（`~` 下只看隐藏目录），都会被看一眼——**不论它在扫描根下深几层**。
-    ///
-    /// 这是**刻意保留的偏差**，记在这里而不是悄悄做（PRD §13.1）：
-    /// DeepSeek Harness 的真实工具根 `…/deepseek-harness-desktop/harness-home` 是
-    /// `~/Library/Application Support` 的孙子（PRD §14.5），OpenCode 的数据根在
-    /// `~/.local/share/opencode`——只扫一层就发现不了它们，而「发现非标准位置」是
-    /// User Story 7 的要求。
-    ///
-    /// 补的那一次只判断声明路径本身存在与否（不列举、不递归），因此递归成本不变；
-    /// 准入口径也不放宽：照样要过结构指纹才能拿到「中」以上。
-    public func discover(scanRoots: [ScanRoot]) -> DiscoveryResult {
         var unreadable: [UnreadableDirectory] = []
         var candidates: [Candidate] = []
-        var seenPaths: Set<String> = []
+        let reader = ShallowDirectoryReader(fileSystem: fileSystem)
 
-        for scanRoot in scanRoots {
-            switch shallowEntries(of: scanRoot) {
-            case let .failure(directory):
-                unreadable.append(directory)
-            case let .success(entries):
-                for entry in entries {
-                    // 一级子目录里只有「真目录」可能是工具根；符号链接不跟随。
-                    guard entry.isDirectory, !entry.isSymbolicLink, seenPaths.insert(entry.path).inserted else {
-                        continue
-                    }
-                    guard let candidate = candidate(
-                        forDirectory: entry,
-                        scanRootPath: scanRoot.path,
-                        unreadable: &unreadable
-                    ) else { continue }
-                    candidates.append(candidate)
-                }
-            }
-        }
+        // 安装检测**先于打分**：这批佐证决定了「高 / 中」，采集放在打分之后就没有意义了
+        // （User Story 10）。它与调用方注入的佐证取并集，两种来源都算数。
+        let evidence = externalEvidence.merging(installation.detect(fileSystem: fileSystem))
 
-        // 规则声明的工具根本身也看一眼：PRD §4.2 的扫描位置全是「一层」，
-        // 而 DeepSeek Harness 的真实工具根在 `~/Library/Application Support/deepseek-harness-desktop/harness-home`
-        // ——它是那一层目录的**孙子**，只扫一层就永远发现不了它。
-        // 这里只做一次存在性判断（不递归、不列举），因此仍然属于浅扫；
-        // 它也不放宽准入：照样要过结构指纹才能拿到「中」以上。
-        // 这段补漏是相对 spec「只遍历一级子目录」的**已知偏差**，理由见方法文档注释。
-        for path in declaredToolRootPaths() where seenPaths.insert(path).inserted {
-            // 但它**不能绕过扫描位置的筛选口径**：`~` 下只看隐藏目录（PRD §4.2），
-            // 因此声明在 `~/notes` 这种非隐藏位置的规则不该被这条补漏捡起来。
-            guard !isOutsideScanRootFilter(path, scanRoots: scanRoots) else { continue }
-            guard ShallowDirectoryReader.isDirectory(path), !ShallowDirectoryReader.isSymbolicLink(path) else {
-                continue
-            }
-            let entry = ShallowDirectoryReader.Entry(
-                name: path.split(separator: "/").last.map(String.init) ?? path,
-                path: path,
-                isDirectory: true,
-                isSymbolicLink: false
-            )
+        for path in declaredToolRootPaths() {
+            // 声明路径本身不存在只是「这里没有可看的东西」（User Story 22），不算读不到；
+            // 是符号链接则不跟随——它指向哪里不关浅扫的事（User Story 12）。
+            guard reader.isDirectory(path), !reader.isSymbolicLink(path) else { continue }
             guard let candidate = candidate(
-                forDirectory: entry,
-                // 补漏来的路径深度不定，把它归到**最近的那个扫描根**名下，
-                // 名称判定才不会越过扫描根去看更上面的段。
-                scanRootPath: enclosingScanRoot(of: path, in: scanRoots)?.path,
+                forToolRootAt: path,
+                evidence: evidence,
+                reader: reader,
                 unreadable: &unreadable
             ) else { continue }
             candidates.append(candidate)
@@ -135,28 +115,6 @@ public struct ToolDiscoverer {
             candidates: sorted(candidates),
             unreadableDirectories: unreadable
         )
-    }
-
-    /// 这个路径是否被某个扫描根的筛选口径明确排除（如 `~` 下的非隐藏目录）。
-    private func isOutsideScanRootFilter(_ path: String, scanRoots: [ScanRoot]) -> Bool {
-        let components = path.split(separator: "/").map(String.init)
-        guard let name = components.last, components.count >= 2 else { return false }
-        let parent = "/" + components.dropLast().joined(separator: "/")
-
-        return scanRoots.contains { scanRoot in
-            guard scanRoot.path == parent else { return false }
-            switch scanRoot.entryFilter {
-            case .allEntries: return false
-            case .hiddenDirectoriesOnly: return !name.hasPrefix(".")
-            }
-        }
-    }
-
-    /// 覆盖 `path` 的、最深的那个扫描根；没有任何扫描根覆盖它时返回 `nil`。
-    private func enclosingScanRoot(of path: String, in scanRoots: [ScanRoot]) -> ScanRoot? {
-        scanRoots
-            .filter { path == $0.path || path.hasPrefix($0.path.hasSuffix("/") ? $0.path : $0.path + "/") }
-            .max { $0.path.count < $1.path.count }
     }
 
     /// 规则集里声明过的全部工具根目录的绝对路径（只认 `role == .toolRoot`）。
@@ -174,27 +132,32 @@ public struct ToolDiscoverer {
 
     // MARK: - 候选判定
 
-    /// 一个一级子目录是否成为候选；不是就返回 `nil`（名字再像也不行）。
+    /// 一个规则声明的工具根是否成为候选；不是就返回 `nil`（名字再像也不行）。
     ///
     /// **准入只认两件事**：目录落在规则声明的工具根上，以及该规则声明的结构指纹命中。
     /// 名称关键词、负向名单、外部佐证都不参与「是否入列」这道判断。
     private func candidate(
-        forDirectory entry: ShallowDirectoryReader.Entry,
-        scanRootPath: String?,
+        forToolRootAt path: String,
+        evidence: ExternalEvidence,
+        reader: ShallowDirectoryReader,
         unreadable: inout [UnreadableDirectory]
     ) -> Candidate? {
-        guard let rule = rule(declaringToolRootAt: entry.path) else { return nil }
+        guard let rule = rule(declaringToolRootAt: path) else { return nil }
         guard let fingerprint = rule.structuralFingerprint else { return nil }
 
-        let evaluated = FingerprintEvaluator.evaluate(fingerprint: fingerprint, toolRootPath: entry.path)
+        let evaluated = FingerprintEvaluator.evaluate(
+            fingerprint: fingerprint,
+            toolRootPath: path,
+            reader: reader
+        )
         unreadable.append(contentsOf: evaluated.unreadable)
 
         // 两件不同的事，各用各的依据：
         // - `nameMatches` 说的是「目录名命中了哪些关键词」——只反映名字，界面如实这么显示；
         // - 外部佐证问的是「这台机器上装没装这个工具」，依据是**候选所属的规则**，
         //   不是目录名碰巧命中了哪几个词。
-        let nameMatches = matchedKeywords(ruleIdentifier: rule.id, of: entry.path)
-        let corroborations = externalEvidence.corroborations(forKeywords: corroborationKeywords(for: rule))
+        let nameMatches = matchedKeywords(ruleIdentifier: rule.id, of: path)
+        let corroborations = evidence.corroborations(forKeywords: corroborationKeywords(for: rule))
             + contentCorroborations(from: evaluated.evidence.contentFeatures)
 
         let signals = ConfirmationSignals(
@@ -217,7 +180,7 @@ public struct ToolDiscoverer {
             demotions.append(.missingStructuralFingerprint)
         }
 
-        if let negative = negativePattern(matching: entry.path, scanRootPath: scanRootPath) {
+        if let negative = negativePattern(matching: path) {
             // 负向名单：已知易误判的名字（`-bak` 旧快照、工具伴生小工具）降权并标疑似
             // （User Story 5、6、PRD A1）。**降权不改变入列**——它已经因为结构证据入列了。
             confidence = .low
@@ -226,8 +189,8 @@ public struct ToolDiscoverer {
         }
 
         return Candidate(
-            toolRootPath: entry.path,
-            displayPath: DisplayPath.abbreviate(entry.path, homeDirectory: homeDirectory),
+            toolRootPath: path,
+            displayPath: DisplayPath.abbreviate(path, homeDirectory: homeDirectory),
             ruleIdentifier: rule.id,
             ruleDisplayName: rule.displayName,
             confidence: confidence,
@@ -235,8 +198,8 @@ public struct ToolDiscoverer {
             signals: signals,
             demotions: demotions,
             protection: BuiltInProtectedPaths.protection(
-                forPath: entry.path,
-                underToolRoot: entry.path,
+                forPath: path,
+                underToolRoot: path,
                 homeDirectory: homeDirectory
             )
         )
@@ -296,20 +259,22 @@ public struct ToolDiscoverer {
 
     /// 命中的负向名单模式（`*` 匹配任意字符，忽略大小写）。
     ///
-    /// ## 只比对扫描器真正判定的那些段
+    /// ## 比对范围：主目录之下、直到工具根的每一段
     ///
-    /// 比对范围是：**工具根自身的名字**，加上它**相对所属扫描根**的那几段。
-    /// 扫描根**本身不是被判定的对象**——它是起点。
+    /// 规则驱动之后没有「扫描根」这层东西了（issue #18），判定边界改成**主目录**：
+    /// 主目录以下的段（`Library`、`Application Support`、`.claude`、`harness-home` …）
+    /// 全部参与比对，工具根自己的名字一定在内。
     ///
-    /// 早先的实现把整条路径逐段拆开全比一遍，于是 `$HOME` **以上**的段也进了比对范围：
+    /// 主目录**本身及以上**（`Users`、用户名、以及主目录目录名）永远不参与比对。
+    /// 早先的实现按整条路径逐段全比，于是 `$HOME` 以上的段也进了比对范围：
     /// 一个叫 `…-backup/Users/x` 的主目录会把该主目录下**每一个**候选都降权成疑似，
     /// 界面还写「命中负向名单 *backup*」——而那条路径本身没有任何问题。
-    /// 名字判定只能落在扫描器看过的那层，否则等于让用户目录名替工具背锅。
+    /// 名字判定只能落在浅扫真正看过的位置，否则等于让用户目录名替工具背锅。
     ///
-    /// `scanRootPath` 为 `nil`（补漏来的路径不落在任何扫描根之下）时只比对最后一段：
-    /// 宁可漏判降权，也不误判——降权会挡住用户看见真正的高置信度候选。
-    private func negativePattern(matching path: String, scanRootPath: String?) -> String? {
-        let components = judgedComponents(of: path, scanRootPath: scanRootPath)
+    /// 声明路径不在主目录之下时只比对它最后一段：宁可漏判降权，也不误判——
+    /// 降权会挡住用户看见真正的高置信度候选。
+    private func negativePattern(matching path: String) -> String? {
+        let components = judgedComponents(of: path)
         guard !components.isEmpty else { return nil }
 
         return hints.negativeNamePatterns.first { pattern in
@@ -317,20 +282,16 @@ public struct ToolDiscoverer {
         }
     }
 
-    /// 名字判定真正看的那几段：相对扫描根的路径（末段一定在内）。
-    private func judgedComponents(of path: String, scanRootPath: String?) -> [String] {
+    /// 名字判定真正看的那几段：主目录之下、直到工具根（含末段）。
+    private func judgedComponents(of path: String) -> [String] {
         let all = path.split(separator: "/").map(String.init)
+        let home = homeDirectory.hasSuffix("/") ? String(homeDirectory.dropLast()) : homeDirectory
 
-        var relative: ArraySlice<String>
-        if let scanRootPath {
-            let root = scanRootPath.split(separator: "/").map(String.init)
-            relative = all.count >= root.count ? all.dropFirst(root.count)[...] : all[...]
-        } else {
-            relative = all.suffix(1)[...]
+        let homeDepth = home.split(separator: "/").count
+        guard path.hasPrefix(home + "/"), all.count > homeDepth else {
+            return all.suffix(1).map { $0 }
         }
-
-        guard let last = relative.last else { return [] }
-        return Array(relative.dropLast()) + [last]
+        return Array(all[homeDepth...])
     }
 
     /// 文件头字段特征 → 外部佐证。
@@ -341,12 +302,19 @@ public struct ToolDiscoverer {
 
     // MARK: - 排序
 
-    /// 候选排序：高 → 中 → 低；同档里名字命中关键词的排前面；再按路径排序保证可复现。
+    /// 候选排序：高 → 中 → 低；同档里有安装佐证的排前面，再是名字命中关键词的；
+    /// 最后按路径排序保证结果可复现。
     ///
-    /// 关键词在这里才起作用——它只影响**顺序**，不影响谁进了列表（User Story 9）。
+    /// 两把排序钥匙的权限边界不一样：
+    /// - **安装佐证**（同名 App / PATH 命令）是安装检测的产物，它决定「高 / 中」，
+    ///   因此同档里也优先（issue #18：安装检测是发现入口与排序依据）。
+    /// - **名称关键词**只影响顺序，不影响谁进了列表（User Story 9）。
     private func sorted(_ candidates: [Candidate]) -> [Candidate] {
         candidates.sorted { left, right in
             if left.confidence != right.confidence { return left.confidence > right.confidence }
+            let leftInstalled = hasInstallationEvidence(left)
+            let rightInstalled = hasInstallationEvidence(right)
+            if leftInstalled != rightInstalled { return leftInstalled }
             let leftKeyword = !left.signals.nameMatches.isEmpty
             let rightKeyword = !right.signals.nameMatches.isEmpty
             if leftKeyword != rightKeyword { return leftKeyword }
@@ -354,44 +322,13 @@ public struct ToolDiscoverer {
         }
     }
 
-    // MARK: - 扫描根列举
-
-    private enum ScanRootOutcome {
-        case success([ShallowDirectoryReader.Entry])
-        case failure(UnreadableDirectory)
-    }
-
-    /// 读一个扫描根的一级子目录，按入口筛选口径过滤。
-    ///
-    /// 扫描根不存在只是「这里没有可看的东西」（User Story 22），不算读不到；
-    /// 读得到但列不出来（权限不足等）才是需要说明的情况。
-    private func shallowEntries(of scanRoot: ScanRoot) -> ScanRootOutcome {
-        guard ShallowDirectoryReader.isDirectory(scanRoot.path) else { return .success([]) }
-
-        do {
-            let entries = try ShallowDirectoryReader.entries(in: scanRoot.path)
-            let filtered = entries.filter { entry in
-                switch scanRoot.entryFilter {
-                case .allEntries:
-                    return true
-                case .hiddenDirectoriesOnly:
-                    return entry.name.hasPrefix(".")
-                }
+    /// 这个候选有没有安装佐证（区别于会话文件头的内容特征：那是另一种佐证）。
+    private func hasInstallationEvidence(_ candidate: Candidate) -> Bool {
+        candidate.signals.externalCorroborations.contains { corroboration in
+            switch corroboration {
+            case .application, .command: return true
+            case .contentFeature: return false
             }
-            return .success(filtered)
-        } catch {
-            return .failure(UnreadableDirectory(path: scanRoot.path, reason: reason(of: error)))
-        }
-    }
-
-    /// 系统错误的中文说明。
-    private func reason(of error: Error) -> String {
-        let nsError = error as NSError
-        guard nsError.domain == NSCocoaErrorDomain else { return nsError.localizedDescription }
-        switch nsError.code {
-        case NSFileReadNoPermissionError: return "权限不足"
-        case NSFileReadNoSuchFileError: return "路径已不存在"
-        default: return nsError.localizedDescription
         }
     }
 }
