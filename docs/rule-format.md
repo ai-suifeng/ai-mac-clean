@@ -16,6 +16,7 @@ JSON 还能直接进 `JSONDecoder`、输出确定（键排序），往返序列�
   "roots": [                     // 必填，至少一条
     { "path": "~/.claude", "role": "toolRoot" }
   ],
+  "installations": [ ... ],            // 可选，默认 []：该工具已知的安装位置
   "structuralFingerprint": { ... },   // 可选
   "cascade": [ ... ],                  // 可选，默认 []
   "projectPathEncoding": { ... },      // 可选
@@ -31,6 +32,7 @@ JSON 还能直接进 `JSONDecoder`、输出确定（键排序），往返序列�
 ## 路径写法
 
 - `roots[].path`：以 `~/` 开头（相对 `$HOME`）或以 `/` 开头（绝对路径）。
+- `installations[].path`：同一套写法（`~/…` 或绝对路径）。
 - 其余所有 `pattern`：相对工具根目录、不以 `/` 开头的模式串。
 
 ### 路径模式语法
@@ -64,6 +66,35 @@ JSON 还能直接进 `JSONDecoder`、输出确定（键排序），往返序列�
 
 模式串会被解析成结构再保存；`canonicalString` 是**幂等**的规范写法
 （`<uuidA>` 会规范成 `<uuid:A>`），因此「写入 → 读出 → 再序列化」结果等价。
+
+## 安装路径声明（`installations`，issue #19）
+
+```jsonc
+"installations": [
+  { "path": "/Applications/Cursor.app",      "kind": "appBundle" },
+  { "path": "~/Applications/Cursor.app",     "kind": "appBundle" },
+  { "path": "~/.claude/local/claude",        "kind": "executable" },
+  { "path": "/opt/homebrew/bin/codex",       "kind": "executable" }
+]
+```
+
+| 字段 | 取值 | 说明 |
+|---|---|---|
+| `path` | `~/…` 或绝对路径 | 该工具已知的安装位置 |
+| `kind` | `appBundle` \| `executable` | `appBundle` 的路径必须以 `.app` 结尾 |
+
+**语义：声明哪条，就只 `stat` 哪条。** 这是安装佐证的**唯一**来源：
+
+- **不得列举通用位置，包括 `/Applications` 与 PATH**（`~/Applications` 同理），也不得列举主目录。
+  一次发现对磁盘的访问只允许落在「规则声明的工具根内部」与「规则声明的安装路径本身」上
+  （issue #19 验收 1）。
+- 声明的路径不存在 = **没有安装佐证**，不是错误，更不是跳过该工具的理由。
+- 省略 `installations` 表示「这个工具没有已知安装位置」：一条都不查。
+  宁可停在「中」，也不替工具猜一个通用位置（issue #19：不为了凑置信度编路径）。
+- 安装佐证只影响「高 / 中」分档与同档排序，**不是准入门**：工具卸载了、数据还在磁盘上，
+  候选照样出现，只是拿不到安装佐证、停在「中」（PRD §4.3、issue #18 的口径，不回退）。
+
+写内置规则时只写**确有其事**的路径；不确定就不写。
 
 ## 文件级联
 

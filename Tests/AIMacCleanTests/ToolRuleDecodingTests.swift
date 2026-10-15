@@ -136,4 +136,88 @@ final class ToolRuleDecodingTests: XCTestCase {
         XCTAssertEqual(rule.classification, [])
         XCTAssertFalse(rule.selfCompressed)
     }
+
+    // MARK: - 安装路径声明（issue #19）
+
+    /// **安装路径声明**：规则声明「这个工具装在哪」。`kind` 只有两种含义——
+    /// App 包与可执行文件——因为安装佐证只分这两类。
+    func test安装路径声明被解析为路径与种类() throws {
+        let json = """
+        {"schemaVersion":1,"id":"x","displayName":"X","roots":[{"path":"~/.x"}],
+         "installations":[
+           {"path":"/Applications/X.app","kind":"appBundle"},
+           {"path":"~/.local/bin/x","kind":"executable"}
+         ]}
+        """
+        let rule = try ToolRule.decode(from: Data(json.utf8))
+
+        XCTAssertEqual(rule.installations, [
+            DeclaredInstallation(path: "/Applications/X.app", kind: .appBundle),
+            DeclaredInstallation(path: "~/.local/bin/x", kind: .executable),
+        ])
+    }
+
+    /// 省略 `installations` = 这个工具没有已知安装位置。**一条都不查**：
+    /// 宁可没有安装佐证停在「中」，也不在代码里替它猜一个通用位置（issue #19）。
+    func test省略安装路径声明时一条都不声明() throws {
+        let json = """
+        {"schemaVersion":1,"id":"x","displayName":"X","roots":[{"path":"~/.x"}]}
+        """
+        let rule = try ToolRule.decode(from: Data(json.utf8))
+
+        XCTAssertEqual(rule.installations, [])
+    }
+
+    /// 安装路径与工具根一样必须锚定：`~/…` 或绝对路径，别的写法一律拒绝。
+    func test安装路径必须锚定主目录或绝对路径() {
+        for bad in [".claude/bin/claude", "bin/claude", "~/"] {
+            let json = """
+            {"schemaVersion":1,"id":"x","displayName":"X","roots":[{"path":"~/.x"}],
+             "installations":[{"path":"\(bad)","kind":"executable"}]}
+            """
+            XCTAssertThrowsError(try ToolRule.decode(from: Data(json.utf8)), "\(bad) 不该被接受") { error in
+                XCTAssertTrue(
+                    "\(error)".contains("installations"),
+                    "报错要指出是哪个字段，实际：\(error)"
+                )
+            }
+        }
+    }
+
+    /// 种类是封闭枚举：读不懂的种类必须报错，而不是静默当成别的东西。
+    func test安装路径种类未知时拒绝() {
+        let json = """
+        {"schemaVersion":1,"id":"x","displayName":"X","roots":[{"path":"~/.x"}],
+         "installations":[{"path":"/opt/homebrew/bin/x","kind":"symlink"}]}
+        """
+        XCTAssertThrowsError(try ToolRule.decode(from: Data(json.utf8))) { error in
+            XCTAssertTrue("\(error)".contains("symlink"), "实际：\(error)")
+        }
+    }
+
+    /// `appBundle` 声称的是 App 包，路径就必须指向 `.app`——
+    /// 否则「同名 App 装在这儿」这条佐证是句说不通的话。
+    func testappBundle声明的路径必须以app结尾() {
+        let json = """
+        {"schemaVersion":1,"id":"x","displayName":"X","roots":[{"path":"~/.x"}],
+         "installations":[{"path":"/Applications/X","kind":"appBundle"}]}
+        """
+        XCTAssertThrowsError(try ToolRule.decode(from: Data(json.utf8))) { error in
+            XCTAssertTrue("\(error)".contains(".app"), "实际：\(error)")
+        }
+    }
+
+    /// 同一工具重复声明同一路径没有意义，只会让「一条声明一次访问」的次数对不上，因此拒绝。
+    func test同一工具重复声明同一安装路径时拒绝() {
+        let json = """
+        {"schemaVersion":1,"id":"x","displayName":"X","roots":[{"path":"~/.x"}],
+         "installations":[
+           {"path":"/opt/homebrew/bin/x","kind":"executable"},
+           {"path":"/opt/homebrew/bin/x","kind":"executable"}
+         ]}
+        """
+        XCTAssertThrowsError(try ToolRule.decode(from: Data(json.utf8))) { error in
+            XCTAssertTrue("\(error)".contains("重复"), "实际：\(error)")
+        }
+    }
 }

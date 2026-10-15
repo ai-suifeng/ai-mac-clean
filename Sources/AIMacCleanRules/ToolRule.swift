@@ -281,6 +281,12 @@ public struct ToolRule: Codable, Equatable, Sendable {
     /// 界面展示名。
     public let displayName: String
     public let roots: [ToolRoot]
+    /// 该工具已知的**安装位置**（issue #19）。
+    ///
+    /// 安装佐证只从这些声明里来：声明哪条就 stat 哪条，不列举任何通用位置
+    /// （`/Applications`、`~/Applications`、PATH 的目录一个都不列）。
+    /// 省略表示「没有已知安装位置」——宁可没有安装佐证，也不替工具猜一个。
+    public let installations: [DeclaredInstallation]
     public let structuralFingerprint: StructuralFingerprint?
     public let cascade: [CascadeRelationship]
     public let projectPathEncoding: ProjectPathEncoding?
@@ -296,6 +302,7 @@ public struct ToolRule: Codable, Equatable, Sendable {
         id: String,
         displayName: String,
         roots: [ToolRoot],
+        installations: [DeclaredInstallation] = [],
         structuralFingerprint: StructuralFingerprint? = nil,
         cascade: [CascadeRelationship] = [],
         projectPathEncoding: ProjectPathEncoding? = nil,
@@ -307,6 +314,7 @@ public struct ToolRule: Codable, Equatable, Sendable {
         self.id = id
         self.displayName = displayName
         self.roots = roots
+        self.installations = installations
         self.structuralFingerprint = structuralFingerprint
         self.cascade = cascade
         self.projectPathEncoding = projectPathEncoding
@@ -316,7 +324,7 @@ public struct ToolRule: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, id, displayName, roots, structuralFingerprint, cascade
+        case schemaVersion, id, displayName, roots, installations, structuralFingerprint, cascade
         case projectPathEncoding, classification, selfCompressed, sessionFileNaming
     }
 
@@ -351,6 +359,16 @@ public struct ToolRule: Codable, Equatable, Sendable {
         }
 
         structuralFingerprint = try container.decodeIfPresent(StructuralFingerprint.self, forKey: .structuralFingerprint)
+        installations = try container.decodeIfPresent([DeclaredInstallation].self, forKey: .installations) ?? []
+        // 同一工具重复声明同一路径只会让「一条声明一次访问」对不上，没有第二种解释。
+        var declaredInstallationPaths: Set<String> = []
+        for installation in installations
+        where !declaredInstallationPaths.insert(installation.path).inserted {
+            throw RuleFormatError.invalidFieldValue(
+                field: "installations.path",
+                reason: "同一个工具重复声明了安装路径：\(installation.path)"
+            )
+        }
         cascade = try container.decodeIfPresent([CascadeRelationship].self, forKey: .cascade) ?? []
         projectPathEncoding = try container.decodeIfPresent(ProjectPathEncoding.self, forKey: .projectPathEncoding)
         classification = try container.decodeIfPresent([ClassificationEntry].self, forKey: .classification) ?? []
