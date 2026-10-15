@@ -78,7 +78,7 @@ public struct ConfirmationSignals: Equatable, Sendable, Codable {
     public var structuralFingerprints: [String]
     /// 命中的名称关键词（只用于排序，不用于准入，PRD §4.3）。
     public var nameMatches: [String]
-    /// 外部佐证：同名 App / PATH 命令 / 会话文件字段特征。
+    /// 外部佐证：规则声明的安装路径命中 / 会话文件字段特征。
     public var externalCorroborations: [ExternalCorroboration]
 
     public init(

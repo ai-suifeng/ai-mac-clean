@@ -47,8 +47,8 @@
 /* Signals and demotions */
 "discovery.signal.structural" = "Structural fingerprint: %@";
 "discovery.signal.name" = "Name match (sorting only): %@";
-"discovery.signal.application" = "Same-named app: %@";
-"discovery.signal.command" = "Command on PATH: %@";
+"discovery.signal.application" = "Install location (app bundle): %@";
+"discovery.signal.command" = "Install location (command): %@";
 "discovery.signal.contentFeature" = "Session file fields: %@";
 "discovery.demotion.negativeName" = "Matches negative list %@, demoted and marked as suspected";
 "discovery.demotion.missingFingerprint" = "No structural feature matched";

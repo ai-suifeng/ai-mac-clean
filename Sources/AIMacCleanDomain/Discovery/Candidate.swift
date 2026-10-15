@@ -6,7 +6,7 @@ import AIMacCleanRules
 ///
 /// 置信度是**候选的属性**，不改变候选是否入列：分档只影响展示顺序与默认折叠。
 public enum ConfidenceTier: String, CaseIterable, Comparable, Sendable {
-    /// 高：结构指纹 **+** 外部佐证（同名 App / PATH 命令 / 会话文件字段特征）。
+    /// 高：结构指纹 **+** 外部佐证（规则声明的安装路径命中 / 会话文件字段特征）。
     case high
     /// 中：仅结构指纹命中。
     case medium
