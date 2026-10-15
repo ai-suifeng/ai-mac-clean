@@ -63,11 +63,14 @@ public protocol DiscoverySource {
 
 /// 生产环境的发现接线（issue #16；把 #12/#15 的零件真正接起来）。
 ///
-/// 一次 `run()` 依次做三件事，顺序本身就是纪律：
+/// 一次 `run()` 依次做两件事，顺序本身就是纪律：
 /// 1. **加载内置规则** → 规则集准入 → 可用规则集（保护单调性在这一步生效）。
-/// 2. **采集外部佐证**：同名 App（`/Applications`、`~/Applications`）与 PATH 中的命令。
-///    这一步**必须**发生在打分之前，否则「高置信度」永远拿不到（User Story 10）。
-/// 3. **浅扫**：只遍历扫描根的一级子目录，产出候选与读不到的目录。
+/// 2. **发现**：安装检测（同名 App / `~/Applications`、PATH 中的命令）作为**入口**
+///    先执行，随后规则驱动的浅扫比对结构指纹并打分。
+///
+/// 安装检测之所以必须发生在打分之前：它决定「高 / 中」，采集放在打分之后就没有意义了
+/// （User Story 10）。它**不是过滤器**——某个工具没装，不影响它的数据目录被发现
+/// （issue #18）。
 ///
 /// 全部输入（主目录、规则目录、词表、应用目录、PATH）都由调用方注入——
 /// 测试才能全部跑在临时目录上（PRD §13 第 3 条）。
@@ -177,16 +180,14 @@ public struct DiscoveryService: DiscoverySource {
 
         let hints = loadHints(issues: &issues)
 
-        let evidence = ExternalEvidenceCollector.detect(
-            applicationDirectories: configuration.applicationDirectories,
-            commandSearchPaths: configuration.commandSearchPaths,
-            fileSystem: fileSystem
-        )
-
         let discoverer = ToolDiscoverer(
             rules: rules,
             hints: hints,
-            externalEvidence: evidence,
+            // 采集位置给进去，采集与打分的前后顺序由发现器保证（issue #18）。
+            installation: InstallationDetection(
+                applicationDirectories: configuration.applicationDirectories,
+                commandSearchPaths: configuration.commandSearchPaths
+            ),
             fileSystem: fileSystem,
             homeDirectory: configuration.homeDirectory
         )

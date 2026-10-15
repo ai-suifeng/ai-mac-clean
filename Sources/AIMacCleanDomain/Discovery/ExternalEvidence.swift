@@ -123,3 +123,45 @@ public enum ExternalEvidenceCollector {
         return permissions.int16Value & 0o111 != 0
     }
 }
+
+/// **安装检测**：这台机器上装了哪些 AI 工具（issue #18；PRD §4.3「关联检测」、User Story 10）。
+///
+/// ## 它是发现入口，不是过滤器
+///
+/// 采集位置全部由调用方注入（本类型不读 `NSHomeDirectory()`、不读环境变量），因此
+/// 「装了什么」这件事可以被完全决定——生产代码给真实的 `/Applications`、`~/Applications`
+/// 与 `PATH`，测试给临时目录。
+///
+/// 检测结果只做两件事：
+/// - 把命中的候选从「中」抬到「高」，并在同档内排在前面；
+/// - 把佐证写进确认信号，让几个月后还看得懂当初为什么这么判（User Story 19）。
+///
+/// **它绝不做第三件事：不因为某个 App 不在 `/Applications`、命令不在 `PATH` 上，
+/// 就跳过那个工具的工具根检查。** 卸载了工具、磁盘上会话还在，正是这个产品最该帮用户
+/// 发现的场景（GLOSSARY 的「移出」流程也依赖它）。因此它只是打分与排序的输入，
+/// 不是准入门。
+public struct InstallationDetection: Equatable, Sendable {
+
+    /// 采集同名 App 的目录（`/Applications`、`~/Applications`）。
+    public var applicationDirectories: [String]
+
+    /// 采集 PATH 命令的目录。
+    public var commandSearchPaths: [String]
+
+    public init(applicationDirectories: [String] = [], commandSearchPaths: [String] = []) {
+        self.applicationDirectories = applicationDirectories
+        self.commandSearchPaths = commandSearchPaths
+    }
+
+    /// 不做安装检测：每个候选都只能靠结构指纹拿到「中」。
+    public static let none = InstallationDetection()
+
+    /// 采集一次安装证据。
+    public func detect(fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem()) -> ExternalEvidence {
+        ExternalEvidenceCollector.detect(
+            applicationDirectories: applicationDirectories,
+            commandSearchPaths: commandSearchPaths,
+            fileSystem: fileSystem
+        )
+    }
+}

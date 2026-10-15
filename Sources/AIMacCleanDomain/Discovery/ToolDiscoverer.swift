@@ -52,13 +52,17 @@ public struct ToolDiscoverer {
     private let rules: [ToolRule]
     private let hints: DiscoveryHints
     private let externalEvidence: ExternalEvidence
+    private let installation: InstallationDetection
     private let fileSystem: any DiscoveryFileSystem
     private let homeDirectory: String
 
     /// - Parameters:
     ///   - rules: **已准入**的规则集（`RuleSetAdmission.admit(...).usableRules`）。
     ///   - hints: 名称关键词与负向名单。默认空：没有词表就只是不排序、不降权。
-    ///   - externalEvidence: 外部佐证（同名 App / PATH 命令）。默认空。
+    ///   - externalEvidence: 调用方**已经采集好**的外部佐证。默认空。
+    ///   - installation: 安装检测的采集位置（`/Applications`、`~/Applications`、PATH）。
+    ///     给了它，发现器就在 `discover()` 里**先采集、后打分**（issue #18）。
+    ///     与 `externalEvidence` 是同一个值的两种来源，两者都算数（取并集）。
     ///   - fileSystem: 浅扫读磁盘的那一层（issue #18）。默认真实文件系统；
     ///     测试注入记录器后可以逐条断言「一次发现访问了哪些路径」。
     ///   - homeDirectory: 把规则里的 `~/` 展开成绝对路径用的主目录，由调用方给出。
@@ -66,12 +70,14 @@ public struct ToolDiscoverer {
         rules: [ToolRule],
         hints: DiscoveryHints = .none,
         externalEvidence: ExternalEvidence = .none,
+        installation: InstallationDetection = .none,
         fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem(),
         homeDirectory: String
     ) {
         self.rules = rules
         self.hints = hints
         self.externalEvidence = externalEvidence
+        self.installation = installation
         self.fileSystem = fileSystem
         self.homeDirectory = homeDirectory
     }
@@ -88,12 +94,17 @@ public struct ToolDiscoverer {
         var candidates: [Candidate] = []
         let reader = ShallowDirectoryReader(fileSystem: fileSystem)
 
+        // 安装检测**先于打分**：这批佐证决定了「高 / 中」，采集放在打分之后就没有意义了
+        // （User Story 10）。它与调用方注入的佐证取并集，两种来源都算数。
+        let evidence = externalEvidence.merging(installation.detect(fileSystem: fileSystem))
+
         for path in declaredToolRootPaths() {
             // 声明路径本身不存在只是「这里没有可看的东西」（User Story 22），不算读不到；
             // 是符号链接则不跟随——它指向哪里不关浅扫的事（User Story 12）。
             guard reader.isDirectory(path), !reader.isSymbolicLink(path) else { continue }
             guard let candidate = candidate(
                 forToolRootAt: path,
+                evidence: evidence,
                 reader: reader,
                 unreadable: &unreadable
             ) else { continue }
@@ -127,6 +138,7 @@ public struct ToolDiscoverer {
     /// 名称关键词、负向名单、外部佐证都不参与「是否入列」这道判断。
     private func candidate(
         forToolRootAt path: String,
+        evidence: ExternalEvidence,
         reader: ShallowDirectoryReader,
         unreadable: inout [UnreadableDirectory]
     ) -> Candidate? {
@@ -145,7 +157,7 @@ public struct ToolDiscoverer {
         // - 外部佐证问的是「这台机器上装没装这个工具」，依据是**候选所属的规则**，
         //   不是目录名碰巧命中了哪几个词。
         let nameMatches = matchedKeywords(ruleIdentifier: rule.id, of: path)
-        let corroborations = externalEvidence.corroborations(forKeywords: corroborationKeywords(for: rule))
+        let corroborations = evidence.corroborations(forKeywords: corroborationKeywords(for: rule))
             + contentCorroborations(from: evaluated.evidence.contentFeatures)
 
         let signals = ConfirmationSignals(
@@ -290,16 +302,33 @@ public struct ToolDiscoverer {
 
     // MARK: - 排序
 
-    /// 候选排序：高 → 中 → 低；同档里名字命中关键词的排前面；再按路径排序保证可复现。
+    /// 候选排序：高 → 中 → 低；同档里有安装佐证的排前面，再是名字命中关键词的；
+    /// 最后按路径排序保证结果可复现。
     ///
-    /// 关键词在这里才起作用——它只影响**顺序**，不影响谁进了列表（User Story 9）。
+    /// 两把排序钥匙的权限边界不一样：
+    /// - **安装佐证**（同名 App / PATH 命令）是安装检测的产物，它决定「高 / 中」，
+    ///   因此同档里也优先（issue #18：安装检测是发现入口与排序依据）。
+    /// - **名称关键词**只影响顺序，不影响谁进了列表（User Story 9）。
     private func sorted(_ candidates: [Candidate]) -> [Candidate] {
         candidates.sorted { left, right in
             if left.confidence != right.confidence { return left.confidence > right.confidence }
+            let leftInstalled = hasInstallationEvidence(left)
+            let rightInstalled = hasInstallationEvidence(right)
+            if leftInstalled != rightInstalled { return leftInstalled }
             let leftKeyword = !left.signals.nameMatches.isEmpty
             let rightKeyword = !right.signals.nameMatches.isEmpty
             if leftKeyword != rightKeyword { return leftKeyword }
             return left.toolRootPath < right.toolRootPath
+        }
+    }
+
+    /// 这个候选有没有安装佐证（区别于会话文件头的内容特征：那是另一种佐证）。
+    private func hasInstallationEvidence(_ candidate: Candidate) -> Bool {
+        candidate.signals.externalCorroborations.contains { corroboration in
+            switch corroboration {
+            case .application, .command: return true
+            case .contentFeature: return false
+            }
         }
     }
 }
