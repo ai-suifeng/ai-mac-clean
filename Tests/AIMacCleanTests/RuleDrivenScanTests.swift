@@ -203,6 +203,99 @@ final class RuleDrivenScanTests: XCTestCase {
         )
     }
 
+    // MARK: - 验收 3：安装检测是发现入口
+
+    /// **验收 3**：安装检测是**发现入口**，而且发生在打分之前。
+    ///
+    /// 两件事一起断言：
+    ///
+    /// 1. **前置**：访问记录里，安装位置（`~/Applications`、PATH 目录）的枚举
+    ///    排在任何工具根的列举之前。顺序本身就是纪律——采集发生在打分之后的话，
+    ///    「高置信度」永远拿不到（User Story 10），而这件事光看结果列表是看不出来的。
+    /// 2. **升档 + 不隐藏**：临时 `~/Applications` 下造一个 `Codex.app`、PATH 上造一个
+    ///    可执行文件，对应工具升为「高」；把 app 移走重跑，**仍然是候选**，只是降为「中」。
+    ///    「卸载了工具但数据还在」正是这个产品最该帮用户发现的场景，绝不能被隐藏。
+    func test安装检测先于打分执行并只影响高或中不影响是否入列() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.home.remove() }
+
+        // 会话文件开头不带规则声明的字段特征，这一档只可能被安装检测撑起来。
+        try fixture.makeFile(
+            ".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-"
+                + "1c2d3e4f-5a6b-7c8d-9e0f-1a2b3c4d5e6f.jsonl.zst",
+            contents: ""
+        )
+        // 装了：同名 App 在 `~/Applications`，同名命令在 PATH 上。
+        let applications = try fixture.makeDirectory("Applications")
+        try fixture.makeDirectory("Applications/Codex.app")
+        let binDirectory = try fixture.makeDirectory("bin")
+        try fixture.writeFile("bin/codex", contents: "#!/bin/sh\n")
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: binDirectory + "/codex"
+        )
+
+        func run() throws -> (candidate: Candidate, accesses: [RecordingDiscoveryFileSystem.Access]) {
+            let recorder = RecordingDiscoveryFileSystem()
+            let result = ToolDiscoverer(
+                rules: try admittedBundledRules(),
+                installation: InstallationDetection(
+                    applicationDirectories: [applications],
+                    commandSearchPaths: [binDirectory]
+                ),
+                fileSystem: recorder,
+                homeDirectory: fixture.homePath
+            ).discover()
+            return (try XCTUnwrap(result.candidates.first), recorder.accesses)
+        }
+
+        // 装了 Codex：升为「高」。
+        let installed = try run()
+        XCTAssertEqual(
+            installed.candidate.confidence, .high,
+            "同名 App 与 PATH 命令都是安装证据，结构指纹 + 它 = 高（User Story 10）"
+        )
+        XCTAssertEqual(
+            installed.candidate.signals.externalCorroborations,
+            [.application("Codex"), .command("codex")]
+        )
+
+        // 前置：安装位置的枚举排在任何工具根之前。
+        let firstToolRootAccess = try XCTUnwrap(
+            installed.accesses.firstIndex { $0.path == fixture.homePath + "/.codex" },
+            "访问记录里找不到工具根：\n\(installed.accesses)"
+        )
+        let lastInstallAccess = try XCTUnwrap(
+            installed.accesses.lastIndex { $0.path == applications || $0.path == binDirectory },
+            "安装检测根本没有发生：\n\(installed.accesses)"
+        )
+        XCTAssertLessThan(
+            lastInstallAccess, firstToolRootAccess,
+            "安装检测必须发生在打分之前：\n\(installed.accesses)"
+        )
+
+        // 卸载了：数据目录仍在候选里，只是拿不到安装佐证。
+        try FileManager.default.removeItem(atPath: applications + "/Codex.app")
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: binDirectory + "/codex"
+        )
+
+        let uninstalled = try run()
+        XCTAssertEqual(
+            uninstalled.candidate.displayPath, "~/.codex",
+            "卸载了工具但数据还在时，候选必须仍然出现，不能被隐藏"
+        )
+        XCTAssertEqual(
+            uninstalled.candidate.confidence, .medium,
+            "拿不到安装佐证就停在「中」——降档，不是出列"
+        )
+        XCTAssertTrue(
+            uninstalled.candidate.signals.externalCorroborations.isEmpty,
+            "App 与可执行命令都没了，就不该再有安装佐证"
+        )
+    }
+
     // MARK: - 辅助
 
     /// 在旧扫描位上铺 `perLocation` 个无关目录，每个都放一个文件，看起来像个真的应用容器。
