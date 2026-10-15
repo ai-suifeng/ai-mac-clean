@@ -21,7 +21,7 @@ final class ToolDiscovererTests: XCTestCase {
             homeDirectory: fixture.homePath
         )
 
-        let result = discoverer.discover(scanRoots: ScanRoot.standard(forHomeDirectory: fixture.homePath))
+        let result = discoverer.discover()
 
         XCTAssertTrue(result.candidates.isEmpty, "没装任何 AI 工具时应给出空列表，而不是报错或塞进噪声目录")
         XCTAssertTrue(result.unreadableDirectories.isEmpty)
@@ -183,19 +183,21 @@ final class ToolDiscovererTests: XCTestCase {
         XCTAssertEqual(candidate.ruleIdentifier, "opencode")
     }
 
-    /// **已记录的偏差**（PRD §13.1）：spec #7 / US2 写的是「浅扫只遍历一级子目录」，
-    /// 但规则声明的工具根在扫描根之下**任意深度**都会被补看一次。
+    /// **代价边界**（issue #18）：规则声明的工具根在**任意深度**都会被检查，
+    /// 但浅扫**不会为了找它去枚举父目录**。
     ///
-    /// 理由：Harness 的工具根是 `~/Library/Application Support` 的孙子（PRD §14.5），
-    /// 只扫一层就永远发现不了它，而「发现非标准位置」是 US7 的要求。
+    /// 规则驱动之后这不再是相对 spec「只遍历一级子目录」的偏差——Harness 的工具根
+    /// `~/Library/Application Support/deepseek-harness-desktop/harness-home` 是那一层的
+    /// **孙子**（PRD §14.5），OpenCode 的数据根在 `~/.local/share/opencode`（PRD §5.4），
+    /// 它们能被找到是因为**规则直接声明了那个路径**，不是因为多下潜了几层。
     ///
-    /// 这条断言钉住偏差的**成本边界**：补漏只判断声明路径本身存在与否，
-    /// 路径不存在就是「没有可看的东西」，不会为了找它去枚举父目录。
-    func test扫描深度偏差只判断声明路径存在与否而不去枚举父目录() throws {
+    /// 要钉住的是代价：声明路径不存在时是「这里没有可看的东西」，
+    /// 一次失败都算不上，更不会为了找它去把它缺失的父目录列一遍。
+    func test规则声明的工具根在任意深度都被检查而缺失的声明路径不会被拿去枚举父目录() throws {
         let fixture = try DiscoveryFixture()
         defer { fixture.home.remove() }
 
-        // 扫描根 `~/Library/Application Support` 的孙子：补漏能捡起来。
+        // 扫描位的**孙子**：规则驱动的口径下照常被发现。
         try fixture.makeFile(
             "Library/Application Support/deepseek-harness-desktop/harness-home"
                 + "/sessions/--Users-xiaowei-work-amc-wt-12--/session-9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f"
@@ -203,26 +205,32 @@ final class ToolDiscovererTests: XCTestCase {
             contents: ""
         )
         // 同一条规则的**另一个**声明根，路径在磁盘上压根不存在：
-        // 补漏对它是「没有可看的东西」，而不是一次失败，更不会去枚举它缺失的父目录。
+        // 它是「没有可看的东西」，而不是一次失败，更不会去枚举它缺失的父目录。
         let ghostRule = RuleFixtures.harnessJSON
             .replacingOccurrences(
                 of: "\"~/Library/Application Support/deepseek-harness-desktop/harness-home\"",
                 with: "\"~/Library/Application Support/never-created-desktop/harness-home\""
             )
 
+        let recorder = RecordingDiscoveryFileSystem()
         let result = ToolDiscoverer(
             rules: try admittedRules([ghostRule]),
+            fileSystem: recorder,
             homeDirectory: fixture.homePath
         ).discover()
 
         XCTAssertEqual(
             result.candidates.map(\.toolRootPath),
             [],
-            "声明的工具根在磁盘上不存在时，补漏不产生候选：\(result.candidates.map(\.toolRootPath))"
+            "声明的工具根在磁盘上不存在时不产生候选：\(result.candidates.map(\.toolRootPath))"
         )
         XCTAssertTrue(
             result.unreadableDirectories.isEmpty,
             "路径缺失不是读不到，不该被报成权限类问题：\(result.unreadableDirectories)"
+        )
+        XCTAssertEqual(
+            recorder.listedDirectories, [],
+            "没有可看的工具根时就不该列举任何目录——包括缺失声明路径的父目录：\n\(recorder.summary)"
         )
     }
 
@@ -293,9 +301,9 @@ final class ToolDiscovererTests: XCTestCase {
         )
     }
 
-    /// 负向名单只比对**扫描器真正判定的那些段**：工具根自身的名字，以及它相对扫描根的路径。
+    /// 负向名单只比对**主目录之下、直到工具根的那些段**。
     ///
-    /// 它绝不该去比对 `$HOME` **以上**的段：否则一个叫 `…-backup/Users/x` 的主目录
+    /// 它绝不该去比对主目录**及以上**：否则一个叫 `…-backup/Users/x` 的主目录
     /// 会把该主目录下每一个候选都降权成疑似——降权理由写在界面上却是
     /// 「命中负向名单 *backup*」，而那条路径本身一点问题都没有。
     func test负向名单不比对主目录以上的路径段() throws {
@@ -687,11 +695,18 @@ final class ToolDiscovererTests: XCTestCase {
 
     // MARK: - 切片 10：扫描位置的筛选口径与外部佐证采集
 
-    func test主目录扫描根只看隐藏目录() throws {
+    /// 「`~` 下只看隐藏目录」这条筛选口径随通用枚举一起下线了（issue #18）。
+    ///
+    /// 它当初存在的原因很具体：旧口径要把 `~` 列一遍，于是必须决定「列出来的哪些
+    /// 值得看」，隐藏目录是那道闸门。现在浅扫根本不再列举 `~`——范围完全由规则决定，
+    /// 因此规则声明了 `~/notes` 就是 `~/notes`，不需要再被一道与规则无关的筛子挡一次。
+    ///
+    /// 出厂规则里没有任何一条声明主目录下的非隐藏路径，所以这条变化对真实机器零影响；
+    /// 它要说明的是口径本身：**规则说了算**。
+    func test规则声明的非隐藏目录同样会被检查因为浅扫不再枚举主目录() throws {
         let fixture = try DiscoveryFixture()
         defer { fixture.home.remove() }
 
-        // 规则声明了 `~/notes`，但 PRD §4.2 的主目录扫描位置是「`~` 下的隐藏目录」。
         try fixture.makeFile("notes/projects/-Users-xiaowei-amc-wt-12/9f8b1a52-0f2e-4b1a-9c3d-1a2b3c4d5e6f.jsonl")
         let rule = RuleFixtures.claudeCodeJSON.replacingOccurrences(of: "\"~/.claude\"", with: "\"~/notes\"")
 
@@ -700,9 +715,9 @@ final class ToolDiscovererTests: XCTestCase {
             homeDirectory: fixture.homePath
         ).discover()
 
-        XCTAssertTrue(
-            result.candidates.isEmpty,
-            "主目录下不隐藏的目录不在浅扫位置里：\(result.candidates.map(\.toolRootPath))"
+        XCTAssertEqual(
+            result.candidates.map(\.displayPath), ["~/notes"],
+            "范围由规则决定，不再由扫描位的隐藏目录口径决定：\(result.candidates.map(\.displayPath))"
         )
     }
 
