@@ -328,7 +328,7 @@ final class ToolDiscovererTests: XCTestCase {
         let candidate = try XCTUnwrap(result.candidates.first)
         XCTAssertEqual(
             candidate.demotions, [],
-            "主目录的名字不是扫描器判定的对象，命中它说明比对范围越过了扫描根：\(candidate.demotions)"
+            "主目录的名字不是扫描器判定的对象，命中它说明比对范围越过了主目录这条边界：\(candidate.demotions)"
         )
         XCTAssertFalse(candidate.isSuspicious)
         // 结构指纹 + 文件头字段特征 = 高（这里刻意不降权，主目录叫什么与它无关）。
