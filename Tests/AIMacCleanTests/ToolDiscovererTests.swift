@@ -932,26 +932,6 @@ final class ToolDiscovererTests: XCTestCase {
 
 // MARK: - 辅助
 
-/// 内置规则文件（issue #15）过一遍规则集准入（issue #11）。
-///
-/// 发现器因此可以在**真实出厂规则**上被断言：新增工具 = 新增一个规则文件（User Story 20）。
-private func admittedBundledRules() throws -> [ToolRule] {
-    let directory = try XCTUnwrap(BuiltInRuleResources.directory, "内置规则应当是 bundle 资源。")
-    let load = RuleLoader.loadRules(inDirectory: directory)
-    XCTAssertEqual(load.diagnostics.map(\.errorDescription), [], "内置规则必须全部读得进来。")
-    let report = RuleSetAdmission.admit(rules: load.rules, homeDirectory: NSTemporaryDirectory())
-    XCTAssertTrue(report.rejections.isEmpty, "内置规则不该被准入拒绝：\(report.rejections)")
-    return report.usableRules
-}
-
-/// 规则夹具先过一遍规则集准入（issue #11）：发现器只消费**已验证可用**的规则集。
-private func admittedRules(_ ruleJSON: [String]) throws -> [ToolRule] {
-    let rules = try ruleJSON.map { try RuleLoader.loadRule(from: Data($0.utf8), source: "夹具") }
-    let report = RuleSetAdmission.admit(rules: rules, homeDirectory: NSTemporaryDirectory())
-    XCTAssertTrue(report.rejections.isEmpty, "夹具规则不该被准入拒绝：\(report.rejections)")
-    return report.usableRules
-}
-
 /// 在任意临时夹具下写文件（树外的夹具也用得上）。
 private func writeTestFile(relativePath: String, contents: String, in fixture: TemporaryDirectoryFixture) throws {
     let url = fixture.url.appendingPathComponent(relativePath)

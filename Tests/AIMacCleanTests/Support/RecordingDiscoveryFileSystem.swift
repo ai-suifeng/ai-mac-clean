@@ -83,6 +83,38 @@ final class RecordingDiscoveryFileSystem: DiscoveryFileSystem {
         accesses.removeAll()
     }
 
+    /// 访问记录的**有界**摘要。断言失败时直接打 `accesses` 会刷出上千行，
+    /// 真正要看的是「碰了哪些位置、碰了多少次」。
+    var summary: String {
+        var lines: [String] = []
+        for directory in listedDirectories {
+            lines.append("列举 \(directory)（该位置下共 \(touched(underOrEqual: directory).count) 次访问）")
+        }
+        let headerCount = accesses.filter { access in
+            if case .header = access { return true }
+            return false
+        }.count
+        lines.append("读文件头 \(headerCount) 次")
+        return lines.joined(separator: "\n")
+    }
+
+    /// 把访问记录里的 `prefix` 换成 `~`，便于跨两棵夹具树比较（临时目录名各不相同）。
+    func abbreviating(_ prefix: String) -> [Access] {
+        let normalized = prefix.hasSuffix("/") ? String(prefix.dropLast()) : prefix
+        return accesses.map { access in
+            func replace(_ path: String) -> String {
+                path == normalized
+                    ? "~"
+                    : (path.hasPrefix(normalized + "/") ? "~" + String(path.dropFirst(normalized.count)) : path)
+            }
+            switch access {
+            case let .listed(path): return .listed(replace(path))
+            case let .stat(path): return .stat(replace(path))
+            case let .header(path): return .header(replace(path))
+            }
+        }
+    }
+
     // MARK: - DiscoveryFileSystem
 
     func entryNames(inDirectory path: String) throws -> [String] {
