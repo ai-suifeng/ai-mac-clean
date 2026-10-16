@@ -12,13 +12,12 @@
 "sidebar.section.archived" = "已归档";
 "sidebar.section.settings" = "设置";
 
-"sidebar.accessibility.overview" = "概览：总占用与可归档预计释放空间";
+"sidebar.accessibility.overview" = "概览：总占用、各工具占用、四类分列与磁盘剩余空间";
 "sidebar.accessibility.discovery" = "发现与确认：候选列表与置信度标识";
 "sidebar.accessibility.archive" = "归档：范围选择、预览与结果汇总";
 "sidebar.accessibility.archived" = "已归档：浏览、搜索与还原";
 "sidebar.accessibility.settings" = "设置：归档位置与已确认工具管理";
 
-"placeholder.overview" = "概览会在深扫落地后展示总占用与可归档预计释放空间。当前阶段还没有任何归档能力。";
 "placeholder.archive" = "归档能力将在自校验归档包落地后可用。当前阶段不会移动或删除任何文件。";
 "placeholder.archived" = "已归档浏览与还原将在后续里程碑可用。";
 "placeholder.settings" = "归档位置与已确认工具管理将在后续里程碑可用。";
@@ -72,3 +71,70 @@
 "discovery.issue.hintsUnavailable" = "关键词 / 负向名单词表这次没读到：%@。没有词表时仍可发现候选，但旧快照与伴生小工具不会被降权。";
 "discovery.issue.storeUnreadable" = "确认记录无法读取：%@。为避免覆盖你已有的判断，本次改动没有保存。";
 "discovery.issue.actionFailed" = "操作没有保存成功：%@";
+
+/* MARK: - 工具分类明细（issue #27；PRD §5.1 四类与处理方式、§9） */
+"classification.fileCount" = "%@ 个文件";
+"classification.category.archivableSession" = "可归档会话";
+"classification.category.cacheAndLog" = "缓存与日志";
+"classification.category.protected" = "受保护";
+"classification.category.uncertain" = "不确定";
+"classification.handling.archivableSession" = "支持归档";
+"classification.handling.archivableSession.stage" = "归档能力在后续里程碑落地；当前版本不会移动或删除任何文件。";
+"classification.handling.cacheAndLog" = "只展示大小，不动";
+"classification.handling.protected" = "永不触碰，仅展示";
+"classification.handling.uncertain" = "锁定，仅展示大小";
+"classification.archivableShare.label" = "可归档占比 %@";
+"classification.archivableShare.tiny" = "可归档占比极小：这个工具的占用几乎都不在可归档范围内，归档它不会释放多少空间。";
+"classification.summary.title" = "主要占用项（按子路径）";
+"classification.summary.row" = "%1$@（%2$@，%3$@）";
+"classification.summary.undeclared" = "规则未声明，归入不确定";
+"classification.summary.protectedReason" = "内置受保护清单：%@";
+"classification.summary.pattern" = "规则声明：%@";
+"classification.summary.ancestor" = "由规则声明 %@ 覆盖";
+"classification.summary.more" = "另有 %@ 项";
+"classification.tool.accessibility" = "%@ 的占用明细";
+"classification.tool.accessibilityValue" = "合计 %1$@，可归档占比 %2$@";
+"classification.category.accessibility" = "%1$@，%2$@，占 %3$@，%4$@";
+"classification.root.toolRoot" = "工具根";
+"classification.root.displayOnly" = "仅展示根";
+"classification.root.displayOnly.note" = "只计算占用，绝不归档也绝不移除";
+"classification.root.accessibility" = "%1$@ %2$@，%3$@";
+"classification.unreadable.title" = "以下位置这次没能读取（已跳过，其余位置照常统计）";
+"classification.unreadable.row" = "%1$@ %2$@：%3$@";
+"classification.unreadable.kind.directory" = "目录";
+"classification.unreadable.kind.item" = "条目（字节数按 0 计）";
+"classification.unreadable.noReason" = "未能取到原因";
+"classification.unreadable.footnote" = "读不到的位置按目录粒度隔离：只有它们没被统计进去。应用不会预先索取完全磁盘访问权限。";
+"classification.page.title" = "分类明细";
+"classification.page.stageNote" = "当前版本只读元数据，不会移动或删除任何文件；四类占用都只展示。归档能力在后续里程碑。";
+"classification.status.scanning" = "正在扫描…（只读元数据与文件头，不动任何文件）";
+"classification.action.reload" = "重新扫描";
+"classification.empty" = "还没有确认过任何工具。先到「发现与确认」页确认 AI 工具，这里才会按类别列出占用。";
+"classification.issue.noRules" = "没有加载到任何内置规则文件，无法判定分类，因此这里不显示占用。请确认打包时把规则资源一并放进了应用包。";
+"classification.issue.rulesRejected" = "加载到 %@ 条规则，但全部未通过规则集准入（保护单调性校验），无法判定分类。";
+"classification.category.share" = "占 %@";
+
+/* MARK: - 概览页（issue #28；PRD §9、§14.1） */
+"overview.page.title" = "概览";
+"overview.stage.note" = "当前阶段只读：不写入、不移动、不删除任何文件。归档能力属于下一个里程碑。";
+"overview.status.scanning" = "正在后台扫描…（上一轮结果保留，界面照常可用）";
+"overview.action.reload" = "重新扫描";
+"overview.empty.noTools" = "还没有确认任何工具。先到「发现与确认」页确认你的 AI 工具，这里才会有可统计的占用。";
+"overview.total.value" = "总占用：%1$@（%2$@ 个文件）";
+"overview.archivable.value" = "可归档占比：%1$@（%2$@）";
+"overview.section.categories" = "按类别分列（四类）";
+"overview.section.tools" = "各工具占用";
+"overview.occupancy.value" = "%1$@（%2$@ 个文件）";
+"overview.tool.archivable" = "可归档 %1$@（%2$@）";
+"overview.tool.negligible" = "可归档占比极小";
+"overview.tool.displayOnly" = "其中仅展示（不参与归档）：%@";
+"overview.disk.free" = "磁盘剩余空间：%1$@（共 %2$@）";
+"overview.disk.unknown.unreadable" = "磁盘剩余空间未知：读不到这个卷，这里不显示数字。";
+"overview.disk.unknown.notReported" = "磁盘剩余空间未知：系统没有报告这个卷的容量，这里不显示数字。";
+"overview.action.archive" = "开始归档";
+"overview.archive.disabledReason" = "归档能力还没落地（属于下一个里程碑）。本阶段只读取元数据，不会写入、移动或删除任何文件。";
+"overview.issue.noRules" = "没有加载到任何内置规则文件，因此这些工具还没被扫描过——这里的占用是「未知」，不是 0 B。请确认打包时把规则资源一并放进了应用包。";
+"overview.issue.rulesRejected" = "加载到 %@ 条规则，但全部未通过规则集准入（保护单调性校验），因此这些工具还没被扫描过——这里的占用是「未知」，不是 0 B。请检查内置规则文件是否被改动。";
+"overview.accessibility.total" = "总占用 %1$@，共 %2$@ 个文件";
+"overview.accessibility.category" = "%1$@：%2$@，%3$@";
+"overview.accessibility.tool" = "%1$@，路径 %2$@，占用 %3$@，可归档 %4$@，占 %5$@";

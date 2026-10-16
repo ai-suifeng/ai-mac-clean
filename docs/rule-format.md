@@ -125,7 +125,7 @@ JSON 还能直接进 `JSONDecoder`、输出确定（键排序），往返序列�
 
 ```jsonc
 "classification": [
-  { "pattern": "sessions/**/rollout-<ISO>.jsonl[.zst]", "category": "archivableSession" },
+  { "pattern": "sessions/<date:year>/<date:month>/<date:day>/rollout-<ISO>.jsonl[.zst]", "category": "archivableSession" },
   { "pattern": "auth.json",                              "category": "protected" },
   { "pattern": "*.sqlite",                               "category": "uncertain" },
   { "pattern": ".tmp/**",                                "category": "cacheAndLog" }
@@ -136,6 +136,69 @@ JSON 还能直接进 `JSONDecoder`、输出确定（键排序），往返序列�
 `protected`（受保护）、`uncertain`（不确定）。**受保护路径就是 `category: "protected"` 的条目**，
 不另设字段。规则文件不能发明新类别，也不能把「不确定」降级为「可归档」——
 这类判断属于规则集准入的保护单调性校验（issue #11），本层不实现。
+
+### 分类判定顺序（issue #25 验收 6）
+
+一条路径同时命中多条分类条目时，归属到**判定顺序**最高的那一类，与条目写在 JSON 里的
+先后无关：
+
+| 顺序 | 类别 | 为什么排在这里 |
+|---|---|---|
+| 1 | `protected`（受保护） | 永不触碰；同时是代码层强制的不变量（PRD §8.1），任何宽泛声明都不能盖过它 |
+| 2 | `uncertain`（不确定） | 「认不出来，仅展示占用」比「这是缓存」更保守——后者可能被读成「可以清」（PRD §2.3） |
+| 3 | `cacheAndLog`（缓存与日志） | 仅展示占用，不动 |
+| 4 | `archivableSession`（可归档会话） | 最低档：没有任何更高档承诺时才成立 |
+
+**没有命中任何条目 = 不确定**（`ClassificationResolution.unclassified`）：规则没声明过的数据
+就是「无法安全分类」的数据（PRD §5.1）。四类占用不能留下第五类「未分类」，而这个默认值
+也只有一个方向——**绝不默认成可归档**。
+
+判定顺序是引擎行为（`Sources/AIMacCleanRules/ClassificationResolution.swift`），
+规则文件不用、也无法改写它；调整条目顺序不会改变任何一条路径的归属。
+
+「受保护」这一档有两个来源，合起来才是 PRD §8.1 的下界：
+
+- 规则里的 `category: "protected"` 条目；
+- **代码层的内置受保护清单**（`BuiltInProtectedPaths`）。它的文件条目按**最后一段**判定，
+  因此 `.credentials.json`、`state.sqlite` 这类嵌套文件也受保护——规则模式是「整条相对路径」，
+  单段模式表达不了嵌套层级，这一段只能靠内置清单兜住（PRD §8.3）。
+
+深扫取类别时把内置清单判一次、作为最高档传进来：
+
+```swift
+report.category(forRelativePath: path, ruleID: id, isBuiltInProtected: isProtected)
+```
+
+传 `true` 时结论一定是 `protected`，规则把它声明成什么都不改变结论；这份判定要列举
+规则声明的工具根（符号链接真实目标），因此**算一次、复用**，不要每个文件都列举一遍。
+
+### 分类模式相对哪个根（issue #25）
+
+`classification[].pattern` 相对**包含该路径的那个已声明根**匹配，因此一条模式可以同时
+作用于 `toolRoot` 与 `displayOnly` 根。`displayOnly` 根（Cursor AppSupport、Harness 的
+纯 Electron profile）不参与准入与结构指纹，但它的数据同样要出现在占用里，所以照样需要
+分类声明：实测的大头写具体模式（`User/**` 归不确定、`Cache/**` 归缓存与日志），
+其余未声明的按上面的默认落在不确定档。
+
+**不得用兜底 `**`**：`{ "pattern": "**", "category": … }` 会把受保护区一起吞掉，
+出厂规则里一条都没有（`BundledToolRuleTests.test内置规则的分类声明没有兜底通配`）。
+
+### 深扫怎么用这些根（issue #31）
+
+- **一个工具的所有已声明根都进占用**：深扫自己从规则里取该工具的根（主根 + `displayOnly` 根），
+  不要求调用方逐个传；`~/…` 用调用方给的主目录展开。`DeepScanReport` 的
+  `ToolScanReport.roots` 按根分列占用，概览页据此显示「Cursor 2.1G + 14G 只展示」（PRD §14.1）。
+- **`displayOnly` 根内的路径一律不可归档**：按规则声明落在缓存与日志 / 受保护 / 不确定三类之一，
+  未声明的落进不确定；规则若在其上声明了 `archivableSession`，深扫把它压回不确定
+  （PRD §2.3、§5.4：只展示、绝不动）。
+- **缺失的 `displayOnly` 根静默跳过**：不报错、不进「读不到」清单，也不算这个工具占用的贡献者
+  （PRD §5.4「规则容忍缺失」）。
+- **文件形态的根**照样进占用，但分类只可能来自内置受保护清单或不确定
+  ——规则的模式都相对**根**匹配，某个路径相对它就是它自己，谁也匹配不到它。
+  出厂规则里就有这样一条：claude-code 把 `~/.claude.json` 声明成 `displayOnly` 根，
+  它的字节因此出现在 Claude Code 的占用里（受保护，内置条目 `home/claude-state`），
+  但一个字节都不算可归档。以前只声明 `~/.claude`，这个文件从来没进过任何工具的占用
+  （`DeepScanBundledRuleTests.test出厂规则把主目录的claude状态文件作为文件形态的仅展示根计入占用`）。
 
 ## 自带压缩与会话文件名形态
 
@@ -199,8 +262,12 @@ RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)   // RuleRejectio
 - **占位符按实际取值范围收紧**：`<uuid>` 只可能是十六进制与短横线，`<date:…>` 只可能是数字，
   `<encodedPath>` / `<名字>` 是**不含点**的单段标识符。因此
   `projects/<encodedPath>/<uuid>.jsonl` 不会被内置条目 `claude-code/history` 误伤。
-- **工具根按符号链接的真实目标判定**：`~/.codex/skills` → `~/.agents/skills` 形态下，
-  整棵工具根都是受保护区域（PRD §14.5）。
+- **工具根按符号链接的真实目标判定（准入这一层）**：`~/.codex/skills` → `~/.agents/skills`
+  形态下，链接覆盖的整片区域都算受保护区域，规则不能把它改判成别的类别（PRD §14.5）。
+  到了**深扫 / 占用**这一层则一律**不跟随链接**：链接仍被判定为受保护
+  （`UnfollowedLink.protectionReason`，界面据此说「这里有一份碰不得的技能」），
+  但目标一个字节都不进这台工具的占用，也不被遍历——否则 `~/.agents/skills` 会被同时
+  算进 `~/.codex` 与 `~/.opencode`，概览总数对不上 `du`（spec #22、issue #23 验收 4）。
 - **规则容忍缺失**：声明的路径在磁盘上不存在不是拒绝理由（User Story 22），
   准入判定完全走路径形状、不 stat 磁盘。
 - **拒绝粒度是单条规则**：一条坏规则不会让其余已知工具的规则失效，
@@ -229,8 +296,8 @@ Sources/AIMacCleanRules/BuiltInRuleResources.swift ← 只给出这个目录在 
 |---|---|---|---|---|---|
 | `claude-code.json` | `~/.claude` | `~/.claude/local/claude`、`~/.local/bin/claude` | `singleDash` | 否 | 实测校正（PRD §5.4 / §14.5） |
 | `codex-cli.json` | `~/.codex` | `/opt/homebrew/bin/codex`、`/usr/local/bin/codex` | `inFileField`（`session_meta.payload.cwd`） | 是（`.zst`） | 实测校正 |
-| `cursor.json` | `~/.cursor` | `/Applications/Cursor.app`、`~/Applications/Cursor.app` | `singleDash` | 否 | 仅格式可表达（里程碑 6） |
-| `deepseek-harness.json` | `…/deepseek-harness-desktop/harness-home` | `/Applications/DeepSeek Harness.app` | `doubleDash` | 是（`.zstd`） | 仅格式可表达 |
+| `cursor.json` | `~/.cursor` | `/Applications/Cursor.app`、`~/Applications/Cursor.app` | `singleDash` | 否 | 会话形态待 M6；只展示位置已按实测归位（issue #25） |
+| `deepseek-harness.json` | `…/deepseek-harness-desktop/harness-home` | `/Applications/DeepSeek Harness.app` | `doubleDash` | 是（`.zstd`） | 会话形态待 M6；纯 Electron profile 已按实测归位（issue #25） |
 | `opencode.json` | `~/.local/share/opencode` | **不声明**（没有确有其事的路径） | 不声明 | 否 | 仅发现（User Story 7） |
 
 写这些规则时用掉的几条纪律：
@@ -248,6 +315,11 @@ Sources/AIMacCleanRules/BuiltInRuleResources.swift ← 只给出这个目录在 
   但会产出一条「它其实仍受保护」的警告，让界面去解释一件本可以避免的事。
 - **`classification` 模式要窄**：不带兜底的 `**`。「写宽了」不会被拒绝，
   但会让误伤面变大（PRD §8.3：真正的兜底在代码层的内置保护）。
+- **只展示的数据也要有类别**：`displayOnly` 根不参与准入，但它的内容必须落在
+  受保护 / 不确定 / 缓存与日志里——确认过的大头写具体模式（Cursor AppSupport 的
+  `User/**`、`Cache/**`），其余走「未命中 = 不确定」的默认值，而不是漏成没声明（issue #25）。
+- **判定顺序不用写进规则**：同一路径命中多条时由 `ClassificationResolution` 按
+  「受保护 > 不确定 > 缓存与日志 > 可归档会话」归属，条目顺序随意（issue #25 验收 6）。
 - **文档没说的就取保守值**：OpenCode 的项目路径在 `session.directory` **数据库列**里，
   PRD §5.3 写明第一期不做，而格式里没有「数据库列」这一档，因此**不声明编码方案**，
   而不是硬塞一个 `inFileField` 让引擎去读文件头。

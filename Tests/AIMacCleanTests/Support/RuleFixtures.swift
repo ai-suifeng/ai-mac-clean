@@ -131,6 +131,14 @@ enum RuleFixtures {
     }
     """
 
+    /// 会被**规则集准入**拒绝的规则：把内置受保护的 `settings*.json` 改判成可归档会话
+    /// （保护单调性违规）。用来构造「规则读到了，但一条都没通过准入」这种真实场景——
+    /// 它和「一条规则都没读到」对用户说的是两件不同的事。
+    static let downgradedClaudeCodeJSON = claudeCodeJSON.replacingOccurrences(
+        of: #"{ "pattern": "settings*.json", "category": "protected" }"#,
+        with: #"{ "pattern": "settings*.json", "category": "archivableSession" }"#
+    )
+
     /// DeepSeek Harness：应用支持目录下自定义位置，自带 zstd 压缩，会话 ID 在父目录名里。
     static let harnessJSON = """
     {

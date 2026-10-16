@@ -2,21 +2,35 @@ import SwiftUI
 
 /// 主窗口外壳：一个侧边栏 + 一个分栏内容区（PRD §9 的分栏结构）。
 ///
-/// 本阶段（issue #16）只有「发现与确认」是真实页面，其余四个分栏是占位，
+/// 真实页面：概览（issue #28）与发现与确认（issue #16）；其余三个分栏是占位，
 /// 且占位文案不说任何本阶段还做不到的事。
 public struct WorkspaceShellView: View {
 
     @State private var model: WorkspaceShellModel
     private let discoveryPageModel: DiscoveryPageModel
+    private let overviewPageModel: OverviewPageModel
 
     /// 用生产接线（真实规则目录与本机确认存储）构造外壳。
-    public init() {
-        self.init(discoveryPageModel: .standard())
+    ///
+    /// - Parameter language: 已实现页面的界面语言；`nil` 走 `L10n` 的基准语言（简体中文）。
+    ///   概览页的四类分列与全部文案据此取本地化目录（`OverviewPageModel.standard`）；
+    ///   发现与确认页当前还没有语言参数。
+    public init(language: AppLanguage? = nil) {
+        self.init(
+            discoveryPageModel: .standard(),
+            overviewPageModel: .standard(language: language)
+        )
     }
 
-    /// 注入一个发现与确认页的视图模型（测试与预览用）。
+    /// 注入一个发现与确认页的视图模型（测试与预览用）；概览页用生产接线。
     public init(discoveryPageModel: DiscoveryPageModel) {
+        self.init(discoveryPageModel: discoveryPageModel, overviewPageModel: .standard())
+    }
+
+    /// 注入两个真实页面的视图模型（测试与预览用）。
+    public init(discoveryPageModel: DiscoveryPageModel, overviewPageModel: OverviewPageModel) {
         self.discoveryPageModel = discoveryPageModel
+        self.overviewPageModel = overviewPageModel
         _model = State(initialValue: WorkspaceShellModel())
     }
 
@@ -30,6 +44,8 @@ public struct WorkspaceShellView: View {
             .navigationSplitViewColumnWidth(min: 180, ideal: 200)
         } detail: {
             switch model.selection {
+            case .overview:
+                OverviewView(model: overviewPageModel)
             case .discovery:
                 DiscoveryView(model: discoveryPageModel)
             default:

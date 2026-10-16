@@ -9,13 +9,12 @@
 "sidebar.section.archived" = "Archived";
 "sidebar.section.settings" = "Settings";
 
-"sidebar.accessibility.overview" = "Overview: total usage and estimated space that archiving would free";
+"sidebar.accessibility.overview" = "Overview: total occupancy, occupancy per tool, the four categories and free disk space";
 "sidebar.accessibility.discovery" = "Discover & Confirm: candidate list with confidence labels";
 "sidebar.accessibility.archive" = "Archive: scope selection, preview and results";
 "sidebar.accessibility.archived" = "Archived: browse, search and restore";
 "sidebar.accessibility.settings" = "Settings: archive location and confirmed tools";
 
-"placeholder.overview" = "Overview will show total usage and estimated reclaimable space once deep scanning lands. There is no archiving capability in this milestone.";
 "placeholder.archive" = "Archiving becomes available once self-verifying archives land. This milestone never moves or deletes a file.";
 "placeholder.archived" = "Browsing and restoring archives arrive in a later milestone.";
 "placeholder.settings" = "Archive location and confirmed-tool management arrive in a later milestone.";
@@ -69,3 +68,70 @@
 "discovery.issue.hintsUnavailable" = "The keyword / negative-name list could not be read: %@. Candidates are still discovered, but old snapshots and companion tools will not be demoted.";
 "discovery.issue.storeUnreadable" = "The confirmation records could not be read: %@. To avoid overwriting your existing decisions, nothing was saved this time.";
 "discovery.issue.actionFailed" = "The action was not saved: %@";
+
+/* Classification detail (issue #27; PRD §5.1 four categories and their handling, §9) */
+"classification.fileCount" = "%@ files";
+"classification.category.archivableSession" = "Archivable sessions";
+"classification.category.cacheAndLog" = "Cache & logs";
+"classification.category.protected" = "Protected";
+"classification.category.uncertain" = "Uncertain";
+"classification.handling.archivableSession" = "Archiving supported";
+"classification.handling.archivableSession.stage" = "Archiving lands in a later milestone; this version does not move or delete any file.";
+"classification.handling.cacheAndLog" = "Shown only, never touched";
+"classification.handling.protected" = "Never touched, shown only";
+"classification.handling.uncertain" = "Locked, size shown only";
+"classification.archivableShare.label" = "Archivable share %@";
+"classification.archivableShare.tiny" = "Very little of this is archivable: almost none of this tool's usage is in the archivable category, so archiving it would free little space.";
+"classification.summary.title" = "Main usage by subpath";
+"classification.summary.row" = "%1$@ (%2$@, %3$@)";
+"classification.summary.undeclared" = "Not declared by any rule, counted as Uncertain";
+"classification.summary.protectedReason" = "Built-in protected list: %@";
+"classification.summary.pattern" = "Declared by rule %@";
+"classification.summary.ancestor" = "Covered by rule declaration %@";
+"classification.summary.more" = "%@ more";
+"classification.tool.accessibility" = "%@ usage detail";
+"classification.tool.accessibilityValue" = "Total %1$@, archivable share %2$@";
+"classification.category.accessibility" = "%1$@, %2$@, %3$@ of this tool, %4$@";
+"classification.root.toolRoot" = "Tool root";
+"classification.root.displayOnly" = "Display-only root";
+"classification.root.displayOnly.note" = "Counted for size only, never archived and never removed";
+"classification.root.accessibility" = "%1$@ %2$@, %3$@";
+"classification.unreadable.title" = "These locations could not be read this time (they were skipped; everything else was counted)";
+"classification.unreadable.row" = "%1$@ %2$@: %3$@";
+"classification.unreadable.kind.directory" = "directory";
+"classification.unreadable.kind.item" = "item (counted as 0 bytes)";
+"classification.unreadable.noReason" = "no reason available";
+"classification.unreadable.footnote" = "Unreadable locations are isolated per directory: only they are missing from the totals. The app never asks for Full Disk Access up front.";
+"classification.page.title" = "Usage by Category";
+"classification.page.stageNote" = "This version only reads metadata and never moves or deletes a file; all four categories are shown, nothing more. Archiving lands in a later milestone.";
+"classification.status.scanning" = "Scanning… (reads metadata and file headers only; nothing is modified)";
+"classification.action.reload" = "Scan Again";
+"classification.empty" = "No tool has been confirmed yet. Confirm your AI tools on the Discover & Confirm page and their usage will be listed by category here.";
+"classification.issue.noRules" = "No built-in rule files were loaded, so nothing can be classified and no usage is shown here. Check that the packaged app embeds the rules resources.";
+"classification.issue.rulesRejected" = "%@ rule file(s) were loaded, but none of them passed rule-set admission (the protection-monotonicity check), so nothing can be classified.";
+"classification.category.share" = "%@ of this tool";
+
+/* Overview (issue #28; PRD §9, §14.1) */
+"overview.page.title" = "Overview";
+"overview.stage.note" = "This milestone is read-only: nothing is written, moved or deleted. Archiving arrives in the next milestone.";
+"overview.status.scanning" = "Scanning in the background… (the previous results stay on screen and the window stays usable)";
+"overview.action.reload" = "Scan Again";
+"overview.empty.noTools" = "No tools confirmed yet. Confirm your AI tools on the Discover & Confirm page first — only then can this page show occupancy.";
+"overview.total.value" = "Total occupancy: %1$@ (%2$@ files)";
+"overview.archivable.value" = "Archivable share: %1$@ (%2$@)";
+"overview.section.categories" = "By category (four)";
+"overview.section.tools" = "Occupancy per tool";
+"overview.occupancy.value" = "%1$@ (%2$@ files)";
+"overview.tool.archivable" = "Archivable %1$@ (%2$@)";
+"overview.tool.negligible" = "Archivable share is tiny";
+"overview.tool.displayOnly" = "Of which display-only (never archived): %@";
+"overview.disk.free" = "Free disk space: %1$@ (of %2$@)";
+"overview.disk.unknown.unreadable" = "Free disk space unknown: this volume cannot be read, so no number is shown here.";
+"overview.disk.unknown.notReported" = "Free disk space unknown: the system did not report this volume's capacity, so no number is shown here.";
+"overview.action.archive" = "Start Archiving";
+"overview.archive.disabledReason" = "Archiving is not implemented yet (it belongs to the next milestone). This milestone only reads metadata and never writes, moves or deletes any file.";
+"overview.issue.noRules" = "No built-in rule files were loaded, so these tools were never scanned — their occupancy is unknown here, not 0 B. Check that the packaged app embeds the rules resources.";
+"overview.issue.rulesRejected" = "%@ rule file(s) were loaded, but none of them passed rule-set admission (the protection-monotonicity check), so these tools were never scanned — their occupancy is unknown here, not 0 B. Check whether the built-in rule files were modified.";
+"overview.accessibility.total" = "Total occupancy %1$@, %2$@ files";
+"overview.accessibility.category" = "%1$@: %2$@, %3$@";
+"overview.accessibility.tool" = "%1$@, path %2$@, occupancy %3$@, archivable %4$@, share %5$@";

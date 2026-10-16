@@ -49,10 +49,36 @@ public enum L10n {
         case sidebarAccessibilityArchived = "sidebar.accessibility.archived"
         case sidebarAccessibilitySettings = "sidebar.accessibility.settings"
 
-        case placeholderOverview = "placeholder.overview"
+        // 概览占位文案随 issue #28 下线：这一页已经是真实页面，
+        // 它取的说明改走 `overview.stage.note`（当前阶段的实话）。
         case placeholderArchive = "placeholder.archive"
         case placeholderArchived = "placeholder.archived"
         case placeholderSettings = "placeholder.settings"
+
+        // 概览页（issue #28）
+        case overviewPageTitle = "overview.page.title"
+        case overviewStageNote = "overview.stage.note"
+        case overviewScanning = "overview.status.scanning"
+        case overviewReload = "overview.action.reload"
+        case overviewEmptyNoTools = "overview.empty.noTools"
+        case overviewTotalValue = "overview.total.value"
+        case overviewArchivableValue = "overview.archivable.value"
+        case overviewSectionCategories = "overview.section.categories"
+        case overviewSectionTools = "overview.section.tools"
+        case overviewOccupancyValue = "overview.occupancy.value"
+        case overviewToolArchivable = "overview.tool.archivable"
+        case overviewToolNegligible = "overview.tool.negligible"
+        case overviewToolDisplayOnly = "overview.tool.displayOnly"
+        case overviewDiskFree = "overview.disk.free"
+        case overviewDiskUnknownUnreadable = "overview.disk.unknown.unreadable"
+        case overviewDiskUnknownNotReported = "overview.disk.unknown.notReported"
+        case overviewArchiveAction = "overview.action.archive"
+        case overviewArchiveDisabledReason = "overview.archive.disabledReason"
+        case overviewIssueNoRules = "overview.issue.noRules"
+        case overviewIssueRulesRejected = "overview.issue.rulesRejected"
+        case overviewAccessibilityTotal = "overview.accessibility.total"
+        case overviewAccessibilityCategory = "overview.accessibility.category"
+        case overviewAccessibilityTool = "overview.accessibility.tool"
 
         // 发现与确认页
         case discoveryPageTitle = "discovery.page.title"
@@ -103,6 +129,48 @@ public enum L10n {
         case discoveryIssueHintsUnavailable = "discovery.issue.hintsUnavailable"
         case discoveryIssueStoreUnreadable = "discovery.issue.storeUnreadable"
         case discoveryIssueActionFailed = "discovery.issue.actionFailed"
+
+        // 工具分类明细（issue #27；PRD §5.1 四类与处理方式、§9）
+        case classificationPageTitle = "classification.page.title"
+        case classificationStageNote = "classification.page.stageNote"
+        case classificationScanning = "classification.status.scanning"
+        case classificationReload = "classification.action.reload"
+        case classificationEmpty = "classification.empty"
+        case classificationIssueNoRules = "classification.issue.noRules"
+        case classificationIssueRulesRejected = "classification.issue.rulesRejected"
+        case classificationFileCount = "classification.fileCount"
+        case classificationCategoryArchivableSession = "classification.category.archivableSession"
+        case classificationCategoryCacheAndLog = "classification.category.cacheAndLog"
+        case classificationCategoryProtected = "classification.category.protected"
+        case classificationCategoryUncertain = "classification.category.uncertain"
+        case classificationHandlingArchivableSession = "classification.handling.archivableSession"
+        case classificationHandlingArchivableSessionStage = "classification.handling.archivableSession.stage"
+        case classificationHandlingCacheAndLog = "classification.handling.cacheAndLog"
+        case classificationHandlingProtected = "classification.handling.protected"
+        case classificationHandlingUncertain = "classification.handling.uncertain"
+        case classificationArchivableShareLabel = "classification.archivableShare.label"
+        case classificationArchivableShareTiny = "classification.archivableShare.tiny"
+        case classificationSummaryTitle = "classification.summary.title"
+        case classificationSummaryRow = "classification.summary.row"
+        case classificationSummaryUndeclared = "classification.summary.undeclared"
+        case classificationSummaryProtectedReason = "classification.summary.protectedReason"
+        case classificationSummaryPattern = "classification.summary.pattern"
+        case classificationSummaryAncestor = "classification.summary.ancestor"
+        case classificationSummaryMore = "classification.summary.more"
+        case classificationToolAccessibility = "classification.tool.accessibility"
+        case classificationToolAccessibilityValue = "classification.tool.accessibilityValue"
+        case classificationCategoryAccessibility = "classification.category.accessibility"
+        case classificationCategoryShare = "classification.category.share"
+        case classificationRootToolRoot = "classification.root.toolRoot"
+        case classificationRootDisplayOnly = "classification.root.displayOnly"
+        case classificationRootDisplayOnlyNote = "classification.root.displayOnly.note"
+        case classificationRootAccessibility = "classification.root.accessibility"
+        case classificationUnreadableTitle = "classification.unreadable.title"
+        case classificationUnreadableRow = "classification.unreadable.row"
+        case classificationUnreadableKindDirectory = "classification.unreadable.kind.directory"
+        case classificationUnreadableKindItem = "classification.unreadable.kind.item"
+        case classificationUnreadableNoReason = "classification.unreadable.noReason"
+        case classificationUnreadableFootnote = "classification.unreadable.footnote"
     }
 
     /// 按当前系统语言取文案，取不到时落到中文。
@@ -112,8 +180,10 @@ public enum L10n {
 
     /// 按指定语言取文案。
     ///
-    /// - Parameter language: `nil` 表示跟随系统语言；无论系统语言是什么，
-    ///   取不到时都回落到简体中文，不把 key 显示给用户。
+    /// - Parameter language: `nil` 表示不指定语言，取**基准语言**（简体中文，见
+    ///   `Package.swift` 的 `defaultLocalization`）；界面要显示英文时必须显式传
+    ///   `.english`（页面模型都接一个 `language` 参数，生产接线负责传值）。
+    ///   无论哪种情况，取不到时都回落到简体中文，不把 key 显示给用户。
     public static func text(_ key: Key, language: AppLanguage?) -> String {
         if let language, let bundle = catalogBundle(for: language) {
             let value = bundle.localizedString(forKey: key.rawValue, value: missingSentinel, table: tableName)

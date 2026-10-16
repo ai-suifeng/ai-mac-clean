@@ -101,9 +101,7 @@ enum ProtectedPathMath {
     ///
     /// 忽略大小写：macOS 默认文件系统大小写不敏感，忽略大小写只会多保护、不会少保护。
     static func matches(pattern: String, path: String) -> Bool {
-        let patternCharacters = Array(pattern.lowercased())
-        let pathCharacters = Array(path.lowercased())
-        return matches(patternCharacters: patternCharacters, characters: pathCharacters)
+        matches(patternCharacters: patternCharacters(of: pattern), characters: characters(of: path))
     }
 
     /// 忽略大小写的通配符匹配；`*` 匹配任意字符。
@@ -111,7 +109,21 @@ enum ProtectedPathMath {
         matches(pattern: pattern, path: component)
     }
 
-    private static func matches(patternCharacters: [Character], characters: [Character]) -> Bool {
+    /// 预先把模式 / 文本转成小写字符数组（issue #29 的匹配热路径）。
+    ///
+    /// 深扫要对每个文件跑十几次模式匹配，而模式在一次扫描期间不变：把
+    /// `Array(pattern.lowercased())` 从每次匹配挪到一次，5 万文件下省下的是实数。
+    static func patternCharacters(of pattern: String) -> [Character] {
+        Array(pattern.lowercased())
+    }
+
+    /// 文本 → 小写字符数组（与 `matches(patternCharacters:characters:)` 配套）。
+    static func characters(of text: String) -> [Character] {
+        Array(text.lowercased())
+    }
+
+    /// 与 `matches(pattern:path:)` **同一个算法**，只是两边的字符数组由调用方备好。
+    static func matches(patternCharacters: [Character], characters: [Character]) -> Bool {
         var patternIndex = 0
         var componentIndex = 0
         var lastStarIndex = -1
