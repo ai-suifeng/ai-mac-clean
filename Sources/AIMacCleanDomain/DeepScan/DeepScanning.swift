@@ -13,8 +13,10 @@ import AIMacCleanRules
 ///    因此「不创建 / 不修改 / 不删除」不是靠自觉，而是没有可写的东西。
 /// 2. **只读元数据**：只 `stat` 取大小与类型，不读文件内容——`.zst` / `.zstd`
 ///    只认扩展名（对深扫而言扩展名甚至不影响统计：分类来自规则声明，不来自解码）。
-/// 3. **不跟随符号链接**：目录与文件都不进链接目标；链接一律记进 `unfollowedLinks`，
-///    既不把目标的占用算进来，也不去目标里遍历（PRD §8.2 的同一条纪律）。
+/// 3. **不跟随符号链接**：链接一律记进 `unfollowedLinks`，目标不计入占用、不被遍历
+///    （PRD §8.2 的同一条纪律）。唯一的例外方向是「更保守」：目标被内置清单判为受保护时
+///    把它计进**受保护**（`~/.codex/skills → ~/.agents/skills`），目标是工具根之外
+///    又不受保护时一个字节都不读。
 /// 4. **权限错误按目录粒度隔离**：读不到的目录进 `unreadable`，其余照常统计，
 ///    绝不让一次扫描因为一个目录而整体失败（PRD §4.4）。
 ///
@@ -23,6 +25,9 @@ import AIMacCleanRules
 /// 分类映射来自规则文件的 `classification[{pattern, category}]`。规则没有声明到的路径
 /// 落进**不确定**，绝不默认算作可归档（`CategoryProvenance.undeclared`）。
 /// 受保护判定另外复用 `BuiltInProtectedPaths`（按链接真实目标），规则只展示、不改判。
+/// 同一路径命中多条规则声明时报**判定顺序**最高的那一类
+/// （受保护 > 不确定 > 缓存与日志 > 可归档会话，issue #25 验收 6）。
+///
 /// 接口刻意**不抛错**：扫描本身不会因为某个位置读不到而失败——那些位置按目录粒度
 /// 进 `unreadable`（PRD §4.4）。一个会抛错的签名会诱使调用方把「读不到」升级成
 /// 「整次扫描失败」，而这正是本票要避免的。
@@ -530,11 +535,6 @@ struct DeepScanRuleCatalog {
             report.usableRules.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-    }
-
-    /// 某台工具声明的规则；没有对应规则时为 `nil`。
-    func rule(forTool id: String) -> ToolRule? {
-        rulesByID[id]
     }
 
     /// 某条相对路径的规则声明命中情况。
