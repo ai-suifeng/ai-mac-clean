@@ -177,7 +177,6 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
         return walk.report
     }
 }
-
 // MARK: - 递归
 
 /// 单台工具的递归遍历。一次性用完即弃。
@@ -210,6 +209,18 @@ private struct DirectoryWalk {
     let protectedPathListing: any ProtectedPathDirectoryListing
     let toolRoot: String
 
+    /// 受保护判定的**扫描期快照**（issue #29）。
+    ///
+    /// 逐文件调用 `BuiltInProtectedPaths.protection(...)` 时，每次判定都要重新解析工具根与
+    /// 主目录的符号链接、重新展开受保护目录——本机实测 5 万文件因此要 132 秒。这些信息在
+    /// 一次扫描期间不变，建一份快照（每台工具一份，随遍历用完即弃）后逐路径判定只剩文本比较。
+    /// 判定结论与本文件此前逐次调用的行为逐字段相同（见 `ProtectedPathContextTests`）。
+    let protection: ProtectedPathContext
+
+    /// 这台工具的真实根（已解析符号链接）：遍历时按目录递推每条路径的真实形态，
+    /// 于是逐文件判定不必再自己解析整条路径。
+    private var realToolRoot: String { protection.realToolRoot }
+
     private var buckets: [DataCategory: [BucketKey: Bucket]] = [:]
 
     private var unreadable: [UnreadableEntry] = []
@@ -228,6 +239,11 @@ private struct DirectoryWalk {
         self.homeDirectory = homeDirectory
         self.protectedPathListing = protectedPathListing
         self.toolRoot = PathText.normalize(tool.toolRootPath)
+        self.protection = ProtectedPathContext(
+            toolRoot: self.toolRoot,
+            homeDirectory: homeDirectory,
+            listing: protectedPathListing
+        )
     }
 
     mutating func run() {
@@ -237,7 +253,7 @@ private struct DirectoryWalk {
             recordUnfollowedLink(path: toolRoot, relativePath: "", destination: linkDestination(toolRoot))
             return
         }
-        walk(directory: toolRoot, relativePath: "", protectedReason: nil)
+        walk(directory: toolRoot, relativePath: "", protectedReason: nil, realDirectory: realToolRoot)
     }
 
     // MARK: 递归主体
@@ -248,10 +264,16 @@ private struct DirectoryWalk {
     /// 因此这里不传递类别：一条未声明的路径不可能从父目录「继承」出一个可归档，
     /// 它只会被判成不确定。唯一往下传的是 `protectedReason`——受保护是一次判定，
     /// 命中之后整棵子树都是受保护的（父目录已经判过，不必每个文件重判）。
+    ///
+    /// - Parameter realDirectory: 本目录的**真实路径**（已解析符号链接）。子项的
+    ///   `真实路径 = realDirectory + "/" + 子项名`：本目录是我们逐层走下来的真目录，
+    ///   子项若是普通文件/目录，这个递推与 `ProtectedPathMath.resolvingSymlinks` 逐段解析
+    ///   的结果一致，因此逐文件判定不必再解析整条路径（issue #29 的性能切片）。
     private mutating func walk(
         directory: String,
         relativePath: String,
-        protectedReason: String?
+        protectedReason: String?,
+        realDirectory: String
     ) {
         let entries: [String]
         do {
@@ -271,8 +293,9 @@ private struct DirectoryWalk {
         for name in entries.sorted() {
             let path = PathText.appending(name, to: directory)
             let childRelative = relativePath.isEmpty ? name : relativePath + "/" + name
+            let realPath = PathText.appending(name, to: realDirectory)
 
-            guard let attributes = fileSystem.attributes(ofItemAt: path) else {
+            guard let metadata = fileSystem.metadata(ofItemAt: path) else {
                 // 「读不到」与「是空的」必须分得开：前者记进清单，后者本来就什么都不贡献。
                 unreadable.append(UnreadableEntry(
                     path: path,
@@ -284,7 +307,7 @@ private struct DirectoryWalk {
                 continue
             }
 
-            guard let type = attributes[.type] as? FileAttributeType else {
+            guard let type = metadata.type else {
                 // 连类型都读不出来时**不猜**：列进读不到清单，不按文件计字节。
                 unreadable.append(UnreadableEntry(
                     path: path,
@@ -307,46 +330,58 @@ private struct DirectoryWalk {
                 //
                 // 目标落在工具根**之外**且不受保护时一律跳过：跟随它等于把扫描带出工具根
                 // （PRD §8.2「指向外部目录的链接一律拒绝处理」）。
-                let destination = resolvedLinkDestination(path: path, destination: linkDestination(path))
-                recordUnfollowedLink(path: path, relativePath: childRelative, destination: linkDestination(path))
+                // 链接目标只读一次：同一件事读两遍在 5 万文件里就是多一次系统调用
+                // （issue #29；对结果没有任何影响）。
+                let rawDestination = linkDestination(path)
+                let destination = resolvedLinkDestination(path: path, destination: rawDestination)
+                recordUnfollowedLink(path: path, relativePath: childRelative, destination: rawDestination)
 
                 // 只有「目标在内置清单里受保护」的链接才继续统计，这是安全边界：
                 // 指向工具根之外、又不受保护的目录的链接（用户自己的媒体库、别人的仓库）
                 // 一律拒绝处理（PRD §8.2）——一个字节都不读、不跟随。
+                //
+                // 链接目标是少量路径，这里仍让它自己解析符号链接（`protection(forPath:)`）：
+                // 目标可能整条路径都带链接，不值得为它再维护一套递推。
                 let protectedTarget = destination.flatMap {
-                    BuiltInProtectedPaths.protection(
-                        forPath: $0,
-                        underToolRoot: toolRoot,
-                        homeDirectory: homeDirectory,
-                        listing: protectedPathListing
-                    )?.ruleIdentifier
+                    protection.protection(forPath: $0)?.ruleIdentifier
                 }
 
                 if let destination, let reason = protectedTarget {
-                    walk(directory: destination, relativePath: childRelative, protectedReason: reason)
+                    walk(
+                        directory: destination,
+                        relativePath: childRelative,
+                        protectedReason: reason,
+                        realDirectory: protection.resolvedPath(forPath: destination)
+                    )
                 }
 
             case .typeDirectory:
                 // 目录这一层只认「能形容目录本身」的内置条目；文件级条目留给文件自己判。
-                let reason = protectedReason ?? directoryProtectionReason(forRelativePath: childRelative)
-                walk(directory: path, relativePath: childRelative, protectedReason: reason)
+                let reason = protectedReason ?? directoryProtectionReason(
+                    forPath: path,
+                    relativePath: childRelative,
+                    resolvedPath: realPath
+                )
+                walk(directory: path, relativePath: childRelative, protectedReason: reason, realDirectory: realPath)
 
             default:
                 // 普通文件（以及门、套接字这类非目录条目，按文件计）。只取大小，不读内容。
                 //
                 // 类别按**这条路径自己**判：命中多条时报判定顺序最高的那一类（issue #25），
-                // 一条都没命中就落进不确定。受保护有三个来源，任一命中即受保护：
-                // 已经在受保护目录里、自己命中文件级内置条目、或自己是受保护目标的链接。
+                // 一条都没命中就落进不确定。受保护有两个来源，任一命中即受保护：
+                // 已经在受保护目录里、或自己命中内置条目（含真实目标落在受保护目录之下）。
+                //
+                // `type` 来自条目**自身**的属性（lstat），因此这一支不可能是符号链接；
+                // 指向受保护目标的链接在上一支处理。这里也就无需再读一次链接目标
+                // （issue #29：那曾是每个文件一次多余的 `readlink`）。
                 let fileProtection = protectedReason
-                    ?? protectionReason(forRelativePath: childRelative)
-                    ?? resolvedLinkDestination(path: path, destination: linkDestination(path))
-                        .flatMap { protectionReason(forPath: $0, relativePath: childRelative) }
+                    ?? protectionReason(forPath: path, relativePath: childRelative, resolvedPath: realPath)
                 let resolution = catalog.resolution(
                     forRelativePath: childRelative,
                     toolID: tool.id,
                     isBuiltInProtected: fileProtection != nil
                 )
-                let size = byteSize(of: attributes)
+                let size = metadata.size
                 if size == nil {
                     unreadable.append(UnreadableEntry(
                         path: path,
@@ -404,35 +439,36 @@ private struct DirectoryWalk {
     ///
     /// 复用 M1 的 `BuiltInProtectedPaths`，**按链接真实目标**判定（PRD §8.2 / §14.5）。
     /// 它只展开规则声明的工具根，不列举主目录（issue #19）。
-    func protectionReason(forRelativePath relativePath: String) -> String? {
-        protectionReason(
-            forPath: PathText.appending(relativePath, to: toolRoot),
-            relativePath: relativePath
-        )
+    ///
+    /// `resolvedPath` 由调用方按目录递推给出（issue #29）；这里只再确认一次路径确实落在
+    /// 工具根内，判定本身交给扫描期快照。
+    func protectionReason(forPath path: String, relativePath: String, resolvedPath: String) -> String? {
+        guard !relativePath.isEmpty,
+              isInsideToolRoot(path)
+        else { return nil }
+        return protection.protection(forPath: path, resolvedPath: resolvedPath)?.ruleIdentifier
     }
 
-    /// 绝对路径的内置受保护判定；`relativePath` 只用于保证判定确实落在工具根内。
-    func protectionReason(forPath path: String, relativePath: String) -> String? {
-        guard !relativePath.isEmpty,
-              PathText.isInside(path, root: toolRoot)
-        else { return nil }
-        return BuiltInProtectedPaths.protection(
-            forPath: path,
-            underToolRoot: toolRoot,
-            homeDirectory: homeDirectory,
-            listing: protectedPathListing
-        )?.ruleIdentifier
+    /// 这条路径确实落在工具根内。
+    ///
+    /// 与 `PathText.isInside(path, root: toolRoot)` 等价，但不必把同一个工具根逐字符重新
+    /// 标准化（issue #29：逐文件判定里那是一次纯浪费的字符串拆分）。
+    /// `path` 是本类型按「工具根 + 逐层目录名」拼出来的：目录名里不可能有 `/`，
+    /// `contentsOfDirectory` 也不返回 `.` 与 `..`，因此「已标准化」是构造出来的事实。
+    private func isInsideToolRoot(_ path: String) -> Bool {
+        path.hasPrefix(toolRoot + "/")
     }
 
     /// **目录**这一层是否直接命中受保护条目。
     ///
-    /// 必须与 `protectionReason(forRelativePath:)` 区分开：后者连「目录里有个 `auth.json`」
+    /// 必须与文件级的 `protectionReason(forPath:...)` 区分开：后者连「目录里有个 `auth.json`」
     /// 都会命中（文件级条目按最后一段比较，对任何相对路径都成立），于是整棵子树会被
     /// 判成受保护——那是错的。目录这一层只认能形容目录本身的条目：目录型条目
     /// （`skills*`、`.agents/skills*`）与真正的目录路径。
-    func directoryProtectionReason(forRelativePath relativePath: String) -> String? {
+    func directoryProtectionReason(forPath path: String, relativePath: String, resolvedPath: String) -> String? {
         guard !relativePath.isEmpty else { return nil }
-        guard let reason = protectionReason(forRelativePath: relativePath) else { return nil }
+        guard let reason = protectionReason(forPath: path, relativePath: relativePath, resolvedPath: resolvedPath)
+        else { return nil }
         let last = PathText.components(of: relativePath).last ?? relativePath
         let isDirectoryRule = BuiltInProtectedPaths.rules.contains { rule in
             rule.kind == .directory && PathText.matches(pattern: rule.pattern, component: last)
@@ -466,14 +502,6 @@ private struct DirectoryWalk {
 
     private func linkDestination(_ path: String) -> String? {
         fileSystem.symbolicLinkDestination(atPath: path)
-    }
-
-    private func byteSize(of attributes: [FileAttributeKey: Any]) -> Int64? {
-        guard let size = attributes[.size] else { return nil }
-        if let number = size as? NSNumber { return number.int64Value }
-        if let value = size as? Int64 { return value }
-        if let value = size as? Int { return Int64(value) }
-        return nil
     }
 
     // MARK: 出报告
@@ -526,15 +554,36 @@ private struct DirectoryWalk {
 /// 深扫不会和界面给出两套答案。
 struct DeepScanRuleCatalog {
 
+    /// 一条分类条目的**预编译形态**（issue #29）。
+    ///
+    /// 分类条目在一次扫描期间不变，而判定要对每个文件跑一遍：字面前缀与
+    /// 段数（判定顺序相同时的第二判据）都是模式的常量属性，没有理由每个文件重算一次。
+    private struct CompiledEntry {
+        let pattern: PathPattern
+        let canonicalPattern: String
+        let category: DataCategory
+        let literalBase: String
+        let segmentCount: Int
+    }
+
     private let report: RuleAdmissionReport
-    private let rulesByID: [String: ToolRule]
+    private let entriesByToolID: [String: [CompiledEntry]]
 
     init(report: RuleAdmissionReport) {
         self.report = report
-        self.rulesByID = Dictionary(
-            report.usableRules.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+        var entriesByToolID: [String: [CompiledEntry]] = [:]
+        for rule in report.usableRules where entriesByToolID[rule.id] == nil {
+            entriesByToolID[rule.id] = rule.classification.map { entry in
+                CompiledEntry(
+                    pattern: entry.pattern,
+                    canonicalPattern: entry.pattern.canonicalString,
+                    category: entry.category,
+                    literalBase: Self.literalBase(of: entry.pattern),
+                    segmentCount: entry.pattern.segments.count
+                )
+            }
+        }
+        self.entriesByToolID = entriesByToolID
     }
 
     /// 某条相对路径的规则声明命中情况。
@@ -543,7 +592,7 @@ struct DeepScanRuleCatalog {
         toolID: String,
         isBuiltInProtected: Bool
     ) -> RuleMatchResolution? {
-        guard rulesByID[toolID] != nil else { return nil }
+        guard let entries = entriesByToolID[toolID] else { return nil }
 
         // 按判定顺序归属（受保护 > 不确定 > 缓存与日志 > 可归档会话），
         // 未命中任何条目则按「不确定」（issue #25、PRD §5.1）。
@@ -556,7 +605,7 @@ struct DeepScanRuleCatalog {
 
         // 类别定了，子路径锚点还要定：同一类别的多个文件要能汇总到一处，
         // 界面才看得清「这一类的占用集中在哪」。
-        if let declared = declaredBase(forRelativePath: relativePath, toolID: toolID) {
+        if let declared = declaredBase(forRelativePath: relativePath, entries: entries) {
             return RuleMatchResolution(
                 category: category,
                 anchor: declared.path,
@@ -585,29 +634,35 @@ struct DeepScanRuleCatalog {
     }
 
     /// 路径自己是否被某条模式声明；是的话给出「声明的那一层」。
-    private func declaredBase(forRelativePath relativePath: String, toolID: String) -> DeclaredBase? {
-        guard let rule = rulesByID[toolID], !relativePath.isEmpty else { return nil }
-        guard let entry = firstMatchingEntry(relativePath, rule: rule) else { return nil }
+    private func declaredBase(forRelativePath relativePath: String, entries: [CompiledEntry]) -> DeclaredBase? {
+        guard !relativePath.isEmpty, let entry = firstMatchingEntry(relativePath, entries: entries) else { return nil }
 
         // 锚点取模式的**字面部分**，而不是匹配到的路径本身：
         // `projects/<编码路径>/<uuid>.jsonl` 声明的是「每个项目下的每份转录」，
         // 字面部分是 `projects`，因此这一类汇总到 `projects` 一条；
         // 而 `projects/**` 的字面部分同样是 `projects`。两者因此归到一起，
         // 不会把汇总碎成几百个项目目录名。
-        let base = literalBase(of: entry.pattern)
-        return DeclaredBase(path: base.isEmpty ? relativePath : base, pattern: entry.pattern.canonicalString)
+        let base = entry.literalBase
+        return DeclaredBase(path: base.isEmpty ? relativePath : base, pattern: entry.canonicalPattern)
     }
 
-    /// 按判定顺序取第一条覆盖该路径的分类条目。
-    private func firstMatchingEntry(_ relativePath: String, rule: ToolRule) -> ClassificationEntry? {
-        rule.classification
-            .filter { $0.pattern.matches(relativePath: relativePath) }
-            .min { lhs, rhs in
-                let lhsRank = Self.precedenceRank(lhs.category)
-                let rhsRank = Self.precedenceRank(rhs.category)
-                if lhsRank != rhsRank { return lhsRank < rhsRank }
-                return lhs.pattern.segments.count > rhs.pattern.segments.count
+    /// 按判定顺序取第一条覆盖该路径的分类条目（单趟扫描，不先建一个中间数组）。
+    private func firstMatchingEntry(_ relativePath: String, entries: [CompiledEntry]) -> CompiledEntry? {
+        var best: CompiledEntry?
+        var bestRank = Int.max
+        for entry in entries where entry.pattern.matches(relativePath: relativePath) {
+            let rank = Self.precedenceRank(entry.category)
+            guard let current = best else {
+                best = entry
+                bestRank = rank
+                continue
             }
+            if rank < bestRank || (rank == bestRank && entry.segmentCount > current.segmentCount) {
+                best = entry
+                bestRank = rank
+            }
+        }
+        return best
     }
 
     /// 模式的**字面前缀**：第一个带通配或占位符的段之前的所有段。
@@ -615,7 +670,7 @@ struct DeepScanRuleCatalog {
     /// `projects/**` → `projects`；`projects/<编码路径>/<uuid>.jsonl` → `projects`；
     /// `config.toml` → `config.toml`。尾部的 `**` 也算通配（它意味着「这一层之下」），
     /// 因此不会把 `**` 当成目录名写进子路径。
-    private func literalBase(of pattern: PathPattern) -> String {
+    private static func literalBase(of pattern: PathPattern) -> String {
         var literals: [String] = []
         for segment in pattern.segments {
             guard segment.tokens.count == 1,

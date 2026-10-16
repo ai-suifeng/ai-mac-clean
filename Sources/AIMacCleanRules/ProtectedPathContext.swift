@@ -38,11 +38,23 @@ public struct ProtectedPathContext {
     private let realRoot: String
     private let realHome: String
 
-    /// 按作用域预先分好的内置条目；同一作用域内保持清单原有顺序（先命中先返回）。
-    private let rulesByScope: [BuiltInProtectedScope: [BuiltInProtectedRule]]
+    /// 三个根 + 主目录的**已拆分形态**（issue #29）：判定要反复做「这条路径在不在根下面」，
+    /// 每次重新 `normalize` + 拆分根是把同一件事做上几十万遍。
+    private let normalizedRootComponents: [String]
+    private let realRootComponents: [String]
+    private let realHomeComponents: [String]
+
+    /// 按作用域预先分好的内置条目（模式已预编译成小写字符数组）；
+    /// 同一作用域内保持清单原有顺序（先命中先返回）。
+    private let rulesByScope: [BuiltInProtectedScope: [CompiledRule]]
 
     /// 内置目录条目在磁盘上展开出的受保护目录（已解析符号链接），保持原判定顺序。
     private let protectedDirectories: [ExpandedProtectedDirectory]
+
+    private struct CompiledRule {
+        let rule: BuiltInProtectedRule
+        let patternCharacters: [Character]
+    }
 
     private struct ExpandedProtectedDirectory {
         let rule: BuiltInProtectedRule
@@ -65,9 +77,12 @@ public struct ProtectedPathContext {
         let realRoot = ProtectedPathMath.resolvingSymlinks(normalizedRoot)
         let realHome = ProtectedPathMath.resolvingSymlinks(normalizedHome)
 
-        var rulesByScope: [BuiltInProtectedScope: [BuiltInProtectedRule]] = [:]
+        var rulesByScope: [BuiltInProtectedScope: [CompiledRule]] = [:]
         for rule in BuiltInProtectedPaths.rules {
-            rulesByScope[rule.scope, default: []].append(rule)
+            rulesByScope[rule.scope, default: []].append(CompiledRule(
+                rule: rule,
+                patternCharacters: ProtectedPathMath.patternCharacters(of: rule.pattern)
+            ))
         }
 
         // 受保护目录的展开（原 `protectedDirectoryRule`）：展开根只有已知工具根，
@@ -93,6 +108,9 @@ public struct ProtectedPathContext {
         self.realRoot = realRoot
         self.realHome = realHome
         self.realToolRoot = realRoot
+        self.normalizedRootComponents = ProtectedPathMath.components(of: normalizedRoot)
+        self.realRootComponents = ProtectedPathMath.components(of: realRoot)
+        self.realHomeComponents = ProtectedPathMath.components(of: realHome)
         self.rulesByScope = rulesByScope
         self.protectedDirectories = expanded
     }
@@ -113,34 +131,46 @@ public struct ProtectedPathContext {
     /// 未识别位置黑名单 → 真实目标落在受保护目录之下。
     public func protection(forPath path: String, resolvedPath: String) -> ProtectedMatch? {
         let normalizedPath = ProtectedPathMath.normalize(path)
+        let normalizedPathComponents = ProtectedPathMath.components(of: normalizedPath)
         let realPath = ProtectedPathMath.normalize(resolvedPath)
+        let realPathComponents = ProtectedPathMath.components(of: realPath)
 
         // 1. 链接位置下的「工具根 + 相对路径」。
-        if let relative = nonEmptyRelativePath(of: normalizedPath, under: normalizedRoot),
-           let match = matchRules(scope: scope, relativePath: relative, source: .toolRootRelativePath) {
+        if let relative = relativeComponents(of: normalizedPathComponents, under: normalizedRootComponents),
+           let match = matchRules(scope: scope, components: relative, source: .toolRootRelativePath) {
             return match
         }
 
         // 2. 解析符号链接后的「工具根 + 相对路径」。
-        if let relative = nonEmptyRelativePath(of: realPath, under: realRoot),
-           let match = matchRules(scope: scope, relativePath: relative, source: .resolvedRelativePath) {
+        if let relative = relativeComponents(of: realPathComponents, under: realRootComponents),
+           let match = matchRules(scope: scope, components: relative, source: .resolvedRelativePath) {
             return match
         }
 
         // 3. 主目录下的跨工具条目（`~/.claude.json` 等位于工具根之外）。
-        if let relative = nonEmptyRelativePath(of: realPath, under: realHome),
-           let match = matchRules(scope: .homeDirectory, relativePath: relative, source: .homeRelativePath) {
+        if let relative = relativeComponents(of: realPathComponents, under: realHomeComponents),
+           let match = matchRules(scope: .homeDirectory, components: relative, source: .homeRelativePath) {
             return match
         }
 
         // 4. 纯凭证文件名：与工具无关，任何位置都保护。
-        if let match = matchFileNameRules(scope: .credentialFileName, normalizedPath: normalizedPath, realPath: realPath) {
+        if let match = matchFileNameRules(
+            scope: .credentialFileName,
+            normalizedPath: normalizedPath,
+            normalizedPathComponents: normalizedPathComponents,
+            realPathComponents: realPathComponents
+        ) {
             return match
         }
 
         // 5. 未识别位置的文件名黑名单（PRD §5.5：未知工具默认仅展示）。
         if scope == .unknownLocation,
-           let match = matchFileNameRules(scope: .unknownLocation, normalizedPath: normalizedPath, realPath: realPath) {
+           let match = matchFileNameRules(
+               scope: .unknownLocation,
+               normalizedPath: normalizedPath,
+               normalizedPathComponents: normalizedPathComponents,
+               realPathComponents: realPathComponents
+           ) {
             return match
         }
 
@@ -163,27 +193,36 @@ public struct ProtectedPathContext {
         ProtectedPathMath.resolvingSymlinks(ProtectedPathMath.normalize(path))
     }
 
-    // MARK: - 匹配（与历史实现逐行等价，只是条目按作用域预分好了）
+    // MARK: - 匹配（与历史实现逐行等价，只是根与模式都预先备好）
 
-    private func nonEmptyRelativePath(of path: String, under root: String) -> String? {
-        guard let relative = ProtectedPathMath.relativePath(of: path, under: root),
-              !relative.isEmpty
+    /// 「路径相对根」的那一段；路径不在根之下或就是根本身时返回 `nil`。
+    ///
+    /// 与 `ProtectedPathMath.relativePath(of:under:)` 等价，只是不做 `normalize`
+    /// ——两边都已经是标准化后拆出来的段（issue #29）。
+    private func relativeComponents(of components: [String], under rootComponents: [String]) -> [String]? {
+        guard components.count > rootComponents.count,
+              Array(components.prefix(rootComponents.count)) == rootComponents
         else { return nil }
-        return relative
+        return Array(components.dropFirst(rootComponents.count))
     }
 
     private func matchFileNameRules(
         scope: BuiltInProtectedScope,
         normalizedPath: String,
-        realPath: String
+        normalizedPathComponents: [String],
+        realPathComponents: [String]
     ) -> ProtectedMatch? {
-        var names = [ProtectedPathMath.components(of: realPath).last ?? normalizedPath]
-        if let linkName = ProtectedPathMath.components(of: normalizedPath).last, linkName != names[0] {
+        var names = [realPathComponents.last ?? normalizedPath]
+        if let linkName = normalizedPathComponents.last, linkName != names[0] {
             names.append(linkName)
         }
 
         for name in names {
-            if let match = matchRules(scope: scope, relativePath: name, source: .fileNameBlacklist) {
+            if let match = matchRules(
+                scope: scope,
+                components: [name],
+                source: .fileNameBlacklist
+            ) {
                 return match
             }
         }
@@ -192,37 +231,46 @@ public struct ProtectedPathContext {
 
     private func matchRules(
         scope: BuiltInProtectedScope,
-        relativePath: String,
+        components: [String],
         source: ProtectedMatchSource
     ) -> ProtectedMatch? {
-        let components = ProtectedPathMath.components(of: relativePath)
         guard !components.isEmpty else { return nil }
 
-        for rule in rulesByScope[scope] ?? [] {
+        let lastNameCharacters = components.last.map(ProtectedPathMath.characters(of:))
+
+        for compiled in rulesByScope[scope] ?? [] {
             let matched: Bool
-            switch rule.kind {
+            switch compiled.rule.kind {
             case .file:
-                guard let name = components.last else { continue }
-                matched = ProtectedPathMath.matches(pattern: rule.pattern, component: name)
+                // 文件条目按相对路径的最后一段比较（`*.sqlite` 因此覆盖任意层级）。
+                guard let lastNameCharacters else { continue }
+                matched = ProtectedPathMath.matches(
+                    patternCharacters: compiled.patternCharacters,
+                    characters: lastNameCharacters
+                )
             case .directory:
-                matched = Self.leadingPrefix(of: components, matches: rule.pattern)
+                // 目录条目按相对路径的前缀比较，命中即覆盖整棵子树。
+                matched = Self.leadingPrefix(of: components, matches: compiled.patternCharacters)
             }
 
             guard matched else { continue }
             return ProtectedMatch(
-                ruleIdentifier: rule.identifier,
-                scope: rule.scope,
-                matchedRelativePath: relativePath,
+                ruleIdentifier: compiled.rule.identifier,
+                scope: compiled.rule.scope,
+                matchedRelativePath: components.joined(separator: "/"),
                 matchedVia: source
             )
         }
         return nil
     }
 
-    private static func leadingPrefix(of components: [String], matches pattern: String) -> Bool {
+    private static func leadingPrefix(of components: [String], matches patternCharacters: [Character]) -> Bool {
         for length in 1...components.count {
             let prefix = components.prefix(length).joined(separator: "/")
-            if ProtectedPathMath.matches(pattern: pattern, path: prefix) {
+            if ProtectedPathMath.matches(
+                patternCharacters: patternCharacters,
+                characters: ProtectedPathMath.characters(of: prefix)
+            ) {
                 return true
             }
         }
