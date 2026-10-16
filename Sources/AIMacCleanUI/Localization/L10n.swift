@@ -124,6 +124,19 @@ public enum L10n {
         case classificationSummaryPattern = "classification.summary.pattern"
         case classificationSummaryAncestor = "classification.summary.ancestor"
         case classificationSummaryMore = "classification.summary.more"
+        case classificationToolAccessibility = "classification.tool.accessibility"
+        case classificationToolAccessibilityValue = "classification.tool.accessibilityValue"
+        case classificationCategoryAccessibility = "classification.category.accessibility"
+        case classificationRootToolRoot = "classification.root.toolRoot"
+        case classificationRootDisplayOnly = "classification.root.displayOnly"
+        case classificationRootDisplayOnlyNote = "classification.root.displayOnly.note"
+        case classificationRootAccessibility = "classification.root.accessibility"
+        case classificationUnreadableTitle = "classification.unreadable.title"
+        case classificationUnreadableRow = "classification.unreadable.row"
+        case classificationUnreadableKindDirectory = "classification.unreadable.kind.directory"
+        case classificationUnreadableKindItem = "classification.unreadable.kind.item"
+        case classificationUnreadableNoReason = "classification.unreadable.noReason"
+        case classificationUnreadableFootnote = "classification.unreadable.footnote"
     }
 
     /// 按当前系统语言取文案，取不到时落到中文。

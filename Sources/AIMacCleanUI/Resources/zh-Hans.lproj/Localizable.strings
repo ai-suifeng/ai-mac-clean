@@ -93,3 +93,16 @@
 "classification.summary.pattern" = "规则声明：%@";
 "classification.summary.ancestor" = "由规则声明 %@ 覆盖";
 "classification.summary.more" = "另有 %@ 项";
+"classification.tool.accessibility" = "%@ 的占用明细";
+"classification.tool.accessibilityValue" = "合计 %1$@，可归档占比 %2$@";
+"classification.category.accessibility" = "%1$@，%2$@，占 %3$@，%4$@";
+"classification.root.toolRoot" = "工具根";
+"classification.root.displayOnly" = "仅展示根";
+"classification.root.displayOnly.note" = "只计算占用，绝不归档也绝不移除";
+"classification.root.accessibility" = "%1$@ %2$@，%3$@";
+"classification.unreadable.title" = "以下位置这次没能读取（已跳过，其余位置照常统计）";
+"classification.unreadable.row" = "%1$@ %2$@：%3$@";
+"classification.unreadable.kind.directory" = "目录";
+"classification.unreadable.kind.item" = "条目（字节数按 0 计）";
+"classification.unreadable.noReason" = "未能取到原因";
+"classification.unreadable.footnote" = "读不到的位置按目录粒度隔离：只有它们没被统计进去。应用不会预先索取完全磁盘访问权限。";

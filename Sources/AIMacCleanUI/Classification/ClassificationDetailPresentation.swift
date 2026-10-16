@@ -65,11 +65,84 @@ public enum ClassificationDetailPresenter {
             totalSizeText: report.occupancy.sizeText,
             totalFileCountText: fileCountText(report.occupancy.fileCount, language: language),
             categoryRows: rows,
+            rootRows: report.roots.map { rootRow(for: $0, homeDirectory: homeDirectory, language: language) },
+            unreadableRows: report.unreadable.map { unreadableRow(for: $0, language: language) },
             archivableShareText: percentText(archivableShare),
             isArchivableShareTiny: isTinyShare,
             tinyArchivableShareNotice: isTinyShare
                 ? L10n.text(.classificationArchivableShareTiny, language: language)
-                : nil
+                : nil,
+            accessibilityLabel: L10n.format(
+                .classificationToolAccessibility,
+                [report.displayName],
+                language: language
+            ),
+            accessibilityValue: L10n.format(
+                .classificationToolAccessibilityValue,
+                [report.occupancy.sizeText, percentText(archivableShare)],
+                language: language
+            )
+        )
+    }
+
+    // MARK: - 根
+
+    /// 一个根的一行（主工具根 / 规则声明的仅展示根）。
+    ///
+    /// 一个工具的占用可能来自多个根（issue #31）：Cursor 是 `~/.cursor` 2.1G +
+    /// `~/Library/Application Support/Cursor` 14G。合成一个数会让用户以为 Cursor 只占 2.1G
+    /// （PRD §14.1），因此两个根分开列。
+    private static func rootRow(
+        for root: ToolRootOccupancy,
+        homeDirectory: String,
+        language: AppLanguage?
+    ) -> ClassificationRootRow {
+        let roleText: String = switch root.role {
+        case .toolRoot: L10n.text(.classificationRootToolRoot, language: language)
+        case .displayOnly: L10n.text(.classificationRootDisplayOnly, language: language)
+        }
+        let displayPath = ToolRootDisplay.abbreviated(root.path, homeDirectory: homeDirectory)
+        let sizeText = root.occupancy.sizeText
+        return ClassificationRootRow(
+            roleText: roleText,
+            displayPath: displayPath,
+            sizeText: sizeText,
+            fileCountText: fileCountText(root.occupancy.fileCount, language: language),
+            noteText: root.role == .displayOnly
+                ? L10n.text(.classificationRootDisplayOnlyNote, language: language)
+                : nil,
+            accessibilityLabel: L10n.format(
+                .classificationRootAccessibility,
+                [roleText, displayPath, sizeText],
+                language: language
+            )
+        )
+    }
+
+    // MARK: - 读不到的位置（PRD §4.4）
+
+    /// 一条读不到的位置。
+    ///
+    /// 深扫**不会**因为读不到而失败（PRD §4.4 按目录粒度隔离）：界面的职责是把这些位置
+    /// 如实列出来并说明，而不是让它们从总数里悄悄消失。
+    private static func unreadableRow(
+        for entry: UnreadableEntry,
+        language: AppLanguage?
+    ) -> ClassificationUnreadableRow {
+        let kindText: String = switch entry.kind {
+        case .directory: L10n.text(.classificationUnreadableKindDirectory, language: language)
+        case .item: L10n.text(.classificationUnreadableKindItem, language: language)
+        }
+        let reasonText = entry.reason ?? L10n.text(.classificationUnreadableNoReason, language: language)
+        return ClassificationUnreadableRow(
+            relativePath: entry.relativePath,
+            kindText: kindText,
+            reasonText: reasonText,
+            text: L10n.format(
+                .classificationUnreadableRow,
+                [entry.relativePath, kindText, reasonText],
+                language: language
+            )
         )
     }
 
@@ -81,19 +154,28 @@ public enum ClassificationDetailPresenter {
         language: AppLanguage?
     ) -> ClassificationCategoryRow {
         let summaries = summaryRows(for: occupancy, language: language)
+        let name = nameText(for: occupancy.category, language: language)
+        let handling = handlingText(for: occupancy.category, language: language)
+        let sizeText = occupancy.occupancy.sizeText
+        let shareText = percentText(share(of: occupancy.occupancy.bytes, totalBytes: totalBytes))
         return ClassificationCategoryRow(
             category: occupancy.category,
-            nameText: nameText(for: occupancy.category, language: language),
-            handlingText: handlingText(for: occupancy.category, language: language),
+            nameText: name,
+            handlingText: handling,
             noteText: occupancy.category == .archivableSession
                 ? L10n.text(.classificationHandlingArchivableSessionStage, language: language)
                 : nil,
             isArchivableNow: occupancy.category.isArchivableNow,
-            sizeText: occupancy.occupancy.sizeText,
+            sizeText: sizeText,
             fileCountText: fileCountText(occupancy.occupancy.fileCount, language: language),
-            shareText: percentText(share(of: occupancy.occupancy.bytes, totalBytes: totalBytes)),
+            shareText: shareText,
             summaries: summaries.rows,
-            hiddenSummaryCount: summaries.hidden
+            hiddenSummaryCount: summaries.hidden,
+            accessibilityLabel: L10n.format(
+                .classificationCategoryAccessibility,
+                [name, sizeText, shareText, handling],
+                language: language
+            )
         )
     }
 
@@ -227,6 +309,12 @@ public struct ToolClassificationDetail: Equatable, Identifiable {
     /// 四类的明细行，按 PRD §5.1 顺序；本工具下没有数据的类别不出现。
     public let categoryRows: [ClassificationCategoryRow]
 
+    /// 本工具的占用由哪几个根贡献（主工具根在前，规则声明的仅展示根在后）。
+    public let rootRows: [ClassificationRootRow]
+
+    /// 本次扫描里读不到的位置，逐条列出（PRD §4.4）。
+    public let unreadableRows: [ClassificationUnreadableRow]
+
     /// 可归档占比的展示文案（`0.14%`）：可归档字节 ÷ 本工具总占用。
     public let archivableShareText: String
 
@@ -235,6 +323,12 @@ public struct ToolClassificationDetail: Equatable, Identifiable {
 
     /// 可归档占比极小时的如实标注；正常占比时为 `nil`（界面上不出现任何相关话术）。
     public let tinyArchivableShareNotice: String?
+
+    /// 辅助技术读到的名称：`Claude Code 的占用明细`。
+    public let accessibilityLabel: String
+
+    /// 辅助技术读到的值：`合计 277 MB，可归档占比 0.14%`。
+    public let accessibilityValue: String
 
     public var id: String { toolID }
 
@@ -245,9 +339,13 @@ public struct ToolClassificationDetail: Equatable, Identifiable {
         totalSizeText: String,
         totalFileCountText: String,
         categoryRows: [ClassificationCategoryRow],
+        rootRows: [ClassificationRootRow],
+        unreadableRows: [ClassificationUnreadableRow],
         archivableShareText: String,
         isArchivableShareTiny: Bool,
-        tinyArchivableShareNotice: String?
+        tinyArchivableShareNotice: String?,
+        accessibilityLabel: String,
+        accessibilityValue: String
     ) {
         self.toolID = toolID
         self.displayName = displayName
@@ -255,15 +353,26 @@ public struct ToolClassificationDetail: Equatable, Identifiable {
         self.totalSizeText = totalSizeText
         self.totalFileCountText = totalFileCountText
         self.categoryRows = categoryRows
+        self.rootRows = rootRows
+        self.unreadableRows = unreadableRows
         self.archivableShareText = archivableShareText
         self.isArchivableShareTiny = isArchivableShareTiny
         self.tinyArchivableShareNotice = tinyArchivableShareNotice
+        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityValue = accessibilityValue
     }
 
     /// 取某一类的明细行；本工具下没有该类数据时返回 `nil`。
     public func row(_ category: DataCategory) -> ClassificationCategoryRow? {
         categoryRows.first { $0.category == category }
     }
+
+    /// 要不要单独把根拆开列：只有一个根时不拆（总数已经说明问题）；
+    /// 有仅展示根时必须拆，否则用户会以为工具只占主根那点（PRD §14.1）。
+    public var showsRootBreakdown: Bool { rootRows.count > 1 }
+
+    /// 有没有读不到的位置（没有时界面上不出现任何权限相关的话术，PRD §4.4）。
+    public var hasUnreadableEntries: Bool { !unreadableRows.isEmpty }
 }
 
 /// 类别明细里的一行。
@@ -300,6 +409,9 @@ public struct ClassificationCategoryRow: Equatable, Identifiable {
     /// 被截掉的明细条数：界面上写成「另有 N 项」，不静默丢掉。
     public let hiddenSummaryCount: Int
 
+    /// 辅助技术读到的名称：`受保护，270 MB，占 97.47%，永不触碰，仅展示`。
+    public let accessibilityLabel: String
+
     public var id: String { category.rawValue }
 
     public init(
@@ -312,7 +424,8 @@ public struct ClassificationCategoryRow: Equatable, Identifiable {
         fileCountText: String,
         shareText: String,
         summaries: [ClassificationSummaryRow] = [],
-        hiddenSummaryCount: Int = 0
+        hiddenSummaryCount: Int = 0,
+        accessibilityLabel: String
     ) {
         self.category = category
         self.nameText = nameText
@@ -324,6 +437,7 @@ public struct ClassificationCategoryRow: Equatable, Identifiable {
         self.shareText = shareText
         self.summaries = summaries
         self.hiddenSummaryCount = hiddenSummaryCount
+        self.accessibilityLabel = accessibilityLabel
     }
 }
 
@@ -360,6 +474,70 @@ public struct ClassificationSummaryRow: Equatable, Identifiable {
         self.sizeText = sizeText
         self.fileCountText = fileCountText
         self.attributionText = attributionText
+        self.text = text
+    }
+}
+
+/// 一个根的一行：主工具根（归档范围的起点）或规则声明的仅展示根。
+public struct ClassificationRootRow: Equatable, Identifiable {
+
+    /// 根的角色名（`工具根` / `仅展示根`）。
+    public let roleText: String
+
+    /// 根的展示路径（`~/.cursor`）。
+    public let displayPath: String
+
+    public let sizeText: String
+    public let fileCountText: String
+
+    /// 仅展示根要额外说清纪律：`只计算占用，绝不归档也绝不移除`。主根为 `nil`。
+    public let noteText: String?
+
+    public let accessibilityLabel: String
+
+    public var id: String { displayPath }
+
+    public init(
+        roleText: String,
+        displayPath: String,
+        sizeText: String,
+        fileCountText: String,
+        noteText: String?,
+        accessibilityLabel: String
+    ) {
+        self.roleText = roleText
+        self.displayPath = displayPath
+        self.sizeText = sizeText
+        self.fileCountText = fileCountText
+        self.noteText = noteText
+        self.accessibilityLabel = accessibilityLabel
+    }
+}
+
+/// 一条读不到的位置（PRD §4.4）。
+public struct ClassificationUnreadableRow: Equatable, Identifiable {
+
+    /// 相对所属根的路径。
+    public let relativePath: String
+
+    /// 读不到的对象种类（`目录` / `条目（字节数按 0 计）`）。
+    public let kindText: String
+
+    /// 文件系统给出的原因；读不到时为「未能取到原因」。
+    public let reasonText: String
+
+    /// 渲染用的整行文字：`projects/private 目录：EPERM`。
+    public let text: String
+
+    public var id: String { relativePath + "|" + kindText }
+
+    /// 辅助技术读到的就是这一行——位置与原因缺一不可。
+    public var accessibilityLabel: String { text }
+
+    public init(relativePath: String, kindText: String, reasonText: String, text: String) {
+        self.relativePath = relativePath
+        self.kindText = kindText
+        self.reasonText = reasonText
         self.text = text
     }
 }

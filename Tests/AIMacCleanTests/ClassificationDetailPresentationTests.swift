@@ -185,4 +185,95 @@ final class ClassificationDetailPresentationTests: XCTestCase {
             "规则声明的条目要说清是规则声明的（用户能改；内置清单不能）"
         )
     }
+
+    // MARK: - 验收 4：读不到的位置逐条列出（PRD §4.4）
+
+    func test读不到的位置逐条列出并说明原因() {
+        let report = ClassificationDetailFixture.report(
+            categories: [ClassificationDetailFixture.category(.protected, bytes: 1024, files: 1)],
+            unreadable: [
+                UnreadableEntry(
+                    path: "/Users/example/.claude/projects/private",
+                    relativePath: "projects/private",
+                    toolID: "claude-code",
+                    kind: .directory,
+                    reason: "EPERM"
+                ),
+                // 查不到属性的条目：算进文件数，字节数按 0 计（宁可少报，不凭形状猜）。
+                UnreadableEntry(
+                    path: "/Users/example/.claude/agent-x.jsonl",
+                    relativePath: "agent-x.jsonl",
+                    toolID: "claude-code",
+                    kind: .item,
+                    reason: nil
+                ),
+            ]
+        )
+
+        let detail = detail(report)
+
+        XCTAssertEqual(
+            detail.unreadableRows.map(\.text),
+            [
+                "projects/private 目录：EPERM",
+                "agent-x.jsonl 条目（字节数按 0 计）：未能取到原因",
+            ],
+            "读不到的位置逐条列出，具体是哪个目录、为什么，都写清楚"
+        )
+        XCTAssertTrue(detail.hasUnreadableEntries)
+        XCTAssertEqual(
+            detail.unreadableRows.first?.accessibilityLabel,
+            "projects/private 目录：EPERM",
+            "辅助技术读到的就是这条位置与原因"
+        )
+    }
+
+    // MARK: - 仅展示根：不让「Cursor 只占 2.1G」这种误读发生（PRD §14.1、issue #31）
+
+    func test规则声明的仅展示根单独列出() {
+        let report = ClassificationDetailFixture.report(
+            toolID: "cursor",
+            displayName: "Cursor",
+            toolRootPath: "/Users/example/.cursor",
+            categories: [
+                ClassificationDetailFixture.category(.protected, bytes: ClassificationDetailFixture.bytes(2048), files: 10)
+            ],
+            displayOnlyBytes: ClassificationDetailFixture.bytes(14_336)
+        )
+
+        let cursor = detail(report)
+
+        XCTAssertEqual(cursor.totalSizeText, "16 GB", "总占用含仅展示根")
+        XCTAssertEqual(cursor.rootRows.map(\.roleText), ["工具根", "仅展示根"])
+        XCTAssertEqual(
+            cursor.rootRows.map(\.displayPath),
+            ["~/.cursor", "~/Library/Application Support/Cursor"]
+        )
+        XCTAssertEqual(cursor.rootRows.map(\.sizeText), ["2 GB", "14 GB"])
+        XCTAssertEqual(
+            cursor.rootRows.last?.noteText, "只计算占用，绝不归档也绝不移除",
+            "仅展示根的纪律写在脸上（GLOSSARY：仅展示根）"
+        )
+        XCTAssertTrue(cursor.showsRootBreakdown)
+
+        // 只有主根时不额外拆一遍：总数已经说明问题。
+        XCTAssertFalse(detail(ClassificationDetailFixture.claudeCode()).showsRootBreakdown)
+    }
+
+    // MARK: - 验收 5：辅助技术能读出类别与大小
+
+    func test辅助功能读出类别大小占比与处理方式() {
+        let detail = detail(ClassificationDetailFixture.claudeCode())
+
+        XCTAssertEqual(detail.accessibilityLabel, "Claude Code 的占用明细")
+        XCTAssertEqual(detail.accessibilityValue, "合计 277 MB，可归档占比 0.14%")
+        XCTAssertEqual(
+            detail.row(.protected)?.accessibilityLabel,
+            "受保护，270 MB，占 97.47%，永不触碰，仅展示"
+        )
+        XCTAssertEqual(
+            detail.row(.archivableSession)?.accessibilityLabel,
+            "可归档会话，404 KB，占 0.14%，支持归档"
+        )
+    }
 }

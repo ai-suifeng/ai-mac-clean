@@ -90,3 +90,16 @@
 "classification.summary.pattern" = "Declared by rule %@";
 "classification.summary.ancestor" = "Covered by rule declaration %@";
 "classification.summary.more" = "%@ more";
+"classification.tool.accessibility" = "%@ usage detail";
+"classification.tool.accessibilityValue" = "Total %1$@, archivable share %2$@";
+"classification.category.accessibility" = "%1$@, %2$@, %3$@ of this tool, %4$@";
+"classification.root.toolRoot" = "Tool root";
+"classification.root.displayOnly" = "Display-only root";
+"classification.root.displayOnly.note" = "Counted for size only, never archived and never removed";
+"classification.root.accessibility" = "%1$@ %2$@, %3$@";
+"classification.unreadable.title" = "These locations could not be read this time (they were skipped; everything else was counted)";
+"classification.unreadable.row" = "%1$@ %2$@: %3$@";
+"classification.unreadable.kind.directory" = "directory";
+"classification.unreadable.kind.item" = "item (counted as 0 bytes)";
+"classification.unreadable.noReason" = "no reason available";
+"classification.unreadable.footnote" = "Unreadable locations are isolated per directory: only they are missing from the totals. The app never asks for Full Disk Access up front.";
