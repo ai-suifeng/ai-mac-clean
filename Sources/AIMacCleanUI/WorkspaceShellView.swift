@@ -36,6 +36,9 @@ public struct WorkspaceShellView: View {
                 SectionPlaceholderView(section: model.selection)
             }
         }
+        // 恢复出来的窗口位置若落在所有屏幕的可见区域之外（多屏 / 显示布局变化），
+        // 用户会看不到窗口、以为应用没起来。出现时收拢回主屏，见 `WindowPlacement`。
+        .background(WindowFrameGuard())
     }
 }
 
