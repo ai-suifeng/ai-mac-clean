@@ -89,4 +89,71 @@ final class DeepScanDisplayOnlyRootsTests: XCTestCase {
             [Occupancy(bytes: 1000, fileCount: 1), Occupancy(bytes: 14_000, fileCount: 1)]
         )
     }
+
+    // MARK: - 验收 2：仅展示根内零个字节可归档
+
+    func test仅展示根内零字节可归档且各按规则落在只展示的三类之一() throws {
+        let fixture = try DeepScanFixture(named: "display-only-categories")
+        defer { fixture.remove() }
+
+        let cursor = try cursorTool(fixture, classificationJSON: [
+            archivable,
+            "{\"pattern\": \"Cache/**\", \"category\": \"cacheAndLog\"}",
+            "{\"pattern\": \"storages/**\", \"category\": \"protected\"}",
+            "{\"pattern\": \"User/**\", \"category\": \"uncertain\"}",
+            // 规则（用户可改）把仅展示根里的一条路径声明成可归档：宁可少报，也不许采信。
+            "{\"pattern\": \"sessions/**\", \"category\": \"archivableSession\"}",
+        ])
+
+        // 主根：正常的可归档会话，不受仅展示根的纪律影响。
+        try fixture.write(".cursor/projects/p/a.jsonl", bytes: 1000)
+
+        // 仅展示根（Electron / VSCode 内部存储）：大头 + 缓存 + 受保护 + 未声明。
+        let electron = "Library/Application Support/Cursor"
+        try fixture.write(electron + "/User/state.bin", bytes: 14_000)
+        try fixture.write(electron + "/Cache/blob.bin", bytes: 5000)
+        try fixture.write(electron + "/storages/app.bin", bytes: 200)
+        try fixture.write(electron + "/sessions/leftover.jsonl", bytes: 700)
+        try fixture.write(electron + "/未声明/notes.bin", bytes: 30)
+
+        let report = try XCTUnwrap(
+            scan(RecordingDiscoveryFileSystem(), fixture, cursor).toolReport(id: "cursor")
+        )
+
+        XCTAssertEqual(
+            report.category(.archivableSession)?.occupancy,
+            Occupancy(bytes: 1000, fileCount: 1),
+            "只有主根里的会话可归档；仅展示根一个字节都不许进来（PRD §2.3、§14.1「Cursor AppSupport 14G、可归档 0」）"
+        )
+        XCTAssertEqual(
+            report.category(.cacheAndLog)?.occupancy,
+            Occupancy(bytes: 5000, fileCount: 1),
+            "仅展示根内的缓存与日志按规则声明归缓存与日志（只展示、不动）"
+        )
+        XCTAssertEqual(
+            report.category(.protected)?.occupancy,
+            Occupancy(bytes: 200, fileCount: 1),
+            "规则声明为受保护的部分照旧受保护"
+        )
+        XCTAssertEqual(
+            report.category(.uncertain)?.occupancy,
+            Occupancy(bytes: 14_000 + 700 + 30, fileCount: 3),
+            "Electron 内部存储归不确定；规则误声明成可归档的那条被压回不确定；未声明的一条也进不确定"
+        )
+        XCTAssertEqual(
+            report.category(.uncertain)?.summaries.map(\.subpath),
+            ["User", "sessions", "未声明"],
+            "子路径相对**所属根**（仅展示根）给出，字节多的在前"
+        )
+        XCTAssertEqual(
+            report.displayOnlyOccupancy,
+            Occupancy(bytes: 14_000 + 5000 + 200 + 700 + 30, fileCount: 5),
+            "仅展示根的占用一分不少地进占用，只是一分都不许归档"
+        )
+        XCTAssertEqual(
+            report.occupancy,
+            report.toolRootOccupancy + report.displayOnlyOccupancy,
+            "总占用 = 主根 + 仅展示根"
+        )
+    }
 }
