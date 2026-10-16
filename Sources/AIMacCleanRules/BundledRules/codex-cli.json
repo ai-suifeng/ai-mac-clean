@@ -39,6 +39,7 @@
     { "pattern": "config.toml*", "category": "protected", "note": "配置及其备份（实测 `config.toml` 与 `config.toml.bak`）：内置受保护条目 codex-cli/config。" },
     { "pattern": "auth.json", "category": "protected", "note": "登录凭证，永不触碰：内置受保护条目 codex-cli/auth。" },
     { "pattern": "prompts/**", "category": "protected", "note": "自定义提示词。" },
+    { "pattern": "skills/**", "category": "protected", "note": "技能目录：实测 `~/.codex/skills` 是指向 `~/.agents/skills` 的符号链接（PRD §14.5），按链接真实目标判定为受保护，规则里也声明为受保护，标签与内置保护一致。" },
     { "pattern": "*.sqlite*", "category": "protected", "note": "各状态库：内置受保护条目 codex-cli/sqlite，声明为受保护而不是不确定，避免标签与内置保护不一致。" },
     { "pattern": ".tmp/**", "category": "cacheAndLog", "note": "实测 879M / 24,849 个陈旧文件，纯垃圾但本阶段按规则不碰，只展示占用。" }
   ],
