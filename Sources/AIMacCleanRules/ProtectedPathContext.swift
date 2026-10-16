@@ -10,17 +10,20 @@ import Foundation
 /// 本机实测（issue #29 评论）单次判定约 2.1 ms，其中约 1.6 ms 花在这两件与「这条路径是否
 /// 受保护」无关的事上；5 万文件因此要 132 秒。
 ///
-/// 这两件事在一次扫描期间**不会变**：工具根、主目录、以及内置目录条目在磁盘上展开出来的
+/// 这两件事在一次扫描期间**不会变**：所属根、主目录、以及内置目录条目在磁盘上展开出来的
 /// 位置，都是同一个扫描上下文里的常量。快照把它们算一次，之后每条路径只做纯文本比较。
 ///
 /// ## 它不是缓存，也不改变结论
 ///
 /// - **判定逻辑只有一处实现**：`BuiltInProtectedPaths.protection(...)` 现在就是
 ///   「建一个快照 + 按原语义解析这条路径」的薄封装，两者不可能有第二套答案。
-/// - 快照的作用域是**一次扫描**：调用方（深扫的每台工具各一份）用完即弃，
+/// - 快照的作用域是**一个根的一次遍历**：调用方（深扫的每个根各一份）用完即弃，
 ///   因此仍然保留「宁可每次重算，也不留过期缓存」的纪律——只是把「每次」从
-///   「每个文件」提到「每次扫描」。同一棵树在扫描期间被外部改动时，两者的差异
+///   「每个文件」提到「每个根」。同一棵树在扫描期间被外部改动时，两者的差异
 ///   与深扫本身遍历期间的快照性质一致（深扫本来就按目录逐层读取）。
+/// - 作用域由 `toolRoot` 参数决定：主工具根按它的名字取内置作用域；仅展示根
+///   （issue #31，如 Electron 内部存储）不属于任何已知工具根形状，因此落到
+///   「未识别位置」的文件名黑名单上——保护的下界，只多不少（PRD §2.3）。
 ///
 /// ## 用法
 ///
@@ -29,7 +32,7 @@ import Foundation
 /// - 少量需要自己解析的路径（符号链接目标）用 `protection(forPath:)`。
 public struct ProtectedPathContext {
 
-    /// 工具根的**真实路径**（已解析符号链接）。深扫从它开始按目录递推每条路径的真实形态。
+    /// 所属根的**真实路径**（已解析符号链接）。深扫从它开始按目录递推每条路径的真实形态。
     public let realToolRoot: String
 
     private let normalizedRoot: String
@@ -38,8 +41,8 @@ public struct ProtectedPathContext {
     private let realRoot: String
     private let realHome: String
 
-    /// 三个根 + 主目录的**已拆分形态**（issue #29）：判定要反复做「这条路径在不在根下面」，
-    /// 每次重新 `normalize` + 拆分根是把同一件事做上几十万遍。
+    /// 所属根与主目录的**已拆分形态**（issue #29）：判定要反复做「这条路径在不在根下面」，
+    /// 每次重新 `normalize` + 拆分根，等于把同一件事做上几十万遍。
     private let normalizedRootComponents: [String]
     private let realRootComponents: [String]
     private let realHomeComponents: [String]
@@ -67,6 +70,7 @@ public struct ProtectedPathContext {
     ///   - toolRoot: 工具根绝对路径。
     ///   - homeDirectory: 主目录绝对路径（显式传入，本层不读 `NSHomeDirectory()`）。
     ///   - listing: 目录条目展开用的列举层（issue #19）；注入记录器即可断言「列举了哪些目录」。
+    /// - Parameter toolRoot: 这次遍历的**所属根**，判定作用域按它的名字取。
     public init(
         toolRoot: String,
         homeDirectory: String,
