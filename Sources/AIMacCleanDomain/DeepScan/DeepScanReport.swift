@@ -159,8 +159,16 @@ public enum UnreadableKind: String, Equatable, Hashable, Sendable {
 /// 一条**没有被跟随**的符号链接（issue #23 硬约束：不跟随符号链接）。
 ///
 /// 两个方向都要记：指向工具根**内部**的链接（用户自己想知道的冗余）与指向
-/// 工具根**之外**的链接（PRD §8.2：一律拒绝处理）。两者都不进占用统计——
-/// 跟随它们就等于把别人的数据算成这台工具的、还可能把扫描带出工具根。
+/// 工具根**之外**的链接（PRD §8.2：一律拒绝处理）。
+///
+/// ## 它计什么、不计什么（spec #22）
+///
+/// **零字节、零文件**：无论目标是受保护还是不受保护，链接本身与它的目标都不进占用
+/// （`~/.codex/skills → ~/.agents/skills` 的字节不能被同时算进 `~/.codex` 与 `~/.opencode`，
+/// 否则概览总数对不上 `du`），也绝不遍历目标——访问永远停在规则声明的根内。
+///
+/// 它仍然回答「这条链接碰不碰得」：`protectionReason` 非 `nil` 表示内置清单把这条链接
+/// （或它的真实目标）判为受保护。判定归判定，占用归占用，两者互不换算。
 public struct UnfollowedLink: Equatable, Sendable {
 
     /// 链接自身的路径（绝对）。
@@ -178,12 +186,29 @@ public struct UnfollowedLink: Equatable, Sendable {
     /// 链接目标是否落在**所属根**内部。
     public let isInsideToolRoot: Bool
 
-    public init(path: String, relativePath: String, toolID: String, destination: String?, isInsideToolRoot: Bool) {
+    /// 内置受保护判定的命中来源；非 `nil` 表示这条链接按**真实目标**（PRD §8.2 / §14.5）
+    /// 或链接自身的位置判为受保护。
+    ///
+    /// 这只是**判定**，不是占用：受保护的链接照样计 0 字节 / 0 文件。
+    public let protectionReason: String?
+
+    /// 这条链接是否被判为受保护（与 `protectionReason != nil` 等价，读起来更直白）。
+    public var isProtected: Bool { protectionReason != nil }
+
+    public init(
+        path: String,
+        relativePath: String,
+        toolID: String,
+        destination: String?,
+        isInsideToolRoot: Bool,
+        protectionReason: String? = nil
+    ) {
         self.path = path
         self.relativePath = relativePath
         self.toolID = toolID
         self.destination = destination
         self.isInsideToolRoot = isInsideToolRoot
+        self.protectionReason = protectionReason
     }
 }
 

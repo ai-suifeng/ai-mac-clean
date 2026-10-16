@@ -258,8 +258,12 @@ RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)   // RuleRejectio
 - **占位符按实际取值范围收紧**：`<uuid>` 只可能是十六进制与短横线，`<date:…>` 只可能是数字，
   `<encodedPath>` / `<名字>` 是**不含点**的单段标识符。因此
   `projects/<encodedPath>/<uuid>.jsonl` 不会被内置条目 `claude-code/history` 误伤。
-- **工具根按符号链接的真实目标判定**：`~/.codex/skills` → `~/.agents/skills` 形态下，
-  整棵工具根都是受保护区域（PRD §14.5）。
+- **工具根按符号链接的真实目标判定（准入这一层）**：`~/.codex/skills` → `~/.agents/skills`
+  形态下，链接覆盖的整片区域都算受保护区域，规则不能把它改判成别的类别（PRD §14.5）。
+  到了**深扫 / 占用**这一层则一律**不跟随链接**：链接仍被判定为受保护
+  （`UnfollowedLink.protectionReason`，界面据此说「这里有一份碰不得的技能」），
+  但目标一个字节都不进这台工具的占用，也不被遍历——否则 `~/.agents/skills` 会被同时
+  算进 `~/.codex` 与 `~/.opencode`，概览总数对不上 `du`（spec #22、issue #23 验收 4）。
 - **规则容忍缺失**：声明的路径在磁盘上不存在不是拒绝理由（User Story 22），
   准入判定完全走路径形状、不 stat 磁盘。
 - **拒绝粒度是单条规则**：一条坏规则不会让其余已知工具的规则失效，
