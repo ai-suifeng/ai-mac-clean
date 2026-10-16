@@ -74,6 +74,8 @@ public enum L10n {
         case overviewDiskUnknownNotReported = "overview.disk.unknown.notReported"
         case overviewArchiveAction = "overview.action.archive"
         case overviewArchiveDisabledReason = "overview.archive.disabledReason"
+        case overviewIssueNoRules = "overview.issue.noRules"
+        case overviewIssueRulesRejected = "overview.issue.rulesRejected"
         case overviewAccessibilityTotal = "overview.accessibility.total"
         case overviewAccessibilityCategory = "overview.accessibility.category"
         case overviewAccessibilityTool = "overview.accessibility.tool"

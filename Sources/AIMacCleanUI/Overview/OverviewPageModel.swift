@@ -8,7 +8,7 @@ import AIMacCleanDomain
 /// 页面里所有会出错或需要判断的状态都在这里：扫描中、空状态、占比极小的标注、
 /// 容量未知、归档按钮为什么不可用。视图只做渲染与转发，因此这一层可以在没有窗口的情况下测。
 ///
-/// ## 诚实展示的四条纪律
+/// ## 诚实展示的五条纪律
 ///
 /// 1. **只有已确认的工具进统计**（PRD §4.1 第 4 步）：输入是 `ConfirmationStore.confirmedTools`，
 ///    候选列表里的东西一个都不会被算进来。
@@ -16,7 +16,11 @@ import AIMacCleanDomain
 ///    容量读不到时显示「未知」，绝不显示 0（0 会被读成「盘满了」）。
 /// 3. **收益低就如实说**：可归档占比极小的工具带上「可归档占比极小」，不用大字号暗示收益
 ///    （PRD §9；§14.1 的 Claude Code 是 0.15%）。
-/// 4. **空状态给路**：没有任何已确认工具时引导去「发现与确认」页，而不是摆一排误导性的 0。
+/// 4. **空状态给路**：规则好好的、只是没有任何已确认工具时引导去「发现与确认」页，
+///    而不是摆一排误导性的 0。
+/// 5. **「没扫过」不是「占 0 B」**（ticket #32）：规则资源没打进包（issue #15 记录的
+///    `Bundle.module` 打包风险）或规则全被准入拒绝时，页面收到的是**运行级问题**
+///    （`DeepScanIssue`），这时说清原因，一个占用数字都不摆——连扫都不扫。
 public final class OverviewPageModel: ObservableObject {
 
     /// 界面读的那一份状态。
@@ -24,6 +28,14 @@ public final class OverviewPageModel: ObservableObject {
 
     private let store: ConfirmationStore
     private let scanner: any ConfirmedToolScanning
+
+    /// 运行级问题的出处（ticket #32）。
+    ///
+    /// 与 `scanner` 是**组合**关系，不是二选一：`DeepScanService` 同时是这两条协议，
+    /// 生产接线把同一个实例喂给两个参数。报告走 `scan(_:)`（分类明细页不用它），
+    /// 问题走 `issues()`（分类明细页走自己的 `run()`）。
+    private let issueSource: any DeepScanSource
+
     private let capacityReader: any VolumeCapacityReading
     private let homeDirectory: String
 
@@ -45,12 +57,15 @@ public final class OverviewPageModel: ObservableObject {
     ///   - capacityReader: 卷容量读数（生产用 `SystemVolumeCapacityReader`，测试给固定值）。
     ///   - homeDirectory: 路径缩写用；没有已确认工具时也是容量读数的那个卷。
     ///   - language: 界面语言；`nil` 跟随 `L10n` 的默认（取不到时落到简体中文）。
+    ///   - issueSource: 运行级问题的出处（规则没载入 / 全被拒绝）。生产与 `scanner`
+    ///     是同一个 `DeepScanService`。
     ///   - scheduler: 扫描跑在哪条线程上。默认同步（测试确定），生产用 `.background()`。
     public init(
         store: ConfirmationStore,
         scanner: any ConfirmedToolScanning,
         capacityReader: any VolumeCapacityReading,
         homeDirectory: String,
+        issueSource: any DeepScanSource,
         language: AppLanguage? = nil,
         scheduler: DiscoveryScheduler = .immediate
     ) {
@@ -58,6 +73,7 @@ public final class OverviewPageModel: ObservableObject {
         self.scanner = scanner
         self.capacityReader = capacityReader
         self.homeDirectory = homeDirectory
+        self.issueSource = issueSource
         self.language = language
         self.scheduler = scheduler
         self.state = OverviewPageState()
@@ -67,19 +83,27 @@ public final class OverviewPageModel: ObservableObject {
     ///
     /// - Parameters:
     ///   - scanner: 省略时按 `homeDirectory` 建一个标准的 `DeepScanService`。
+    ///   - issueSource: 省略时用同一个 `DeepScanService`（两条入口收敛在同一个类型上，
+    ///     因此「规则配上了没有」与「报告是从哪来的」不可能分叉）。
     ///   - language: 界面语言，透到四类分列与全部固定文案。
     public static func standard(
         store: ConfirmationStore = JSONConfirmationStore.standard(),
         scanner: (any ConfirmedToolScanning)? = nil,
+        issueSource: (any DeepScanSource)? = nil,
         capacityReader: any VolumeCapacityReading = SystemVolumeCapacityReader(),
         homeDirectory: String = NSHomeDirectory(),
         language: AppLanguage? = nil
     ) -> OverviewPageModel {
-        OverviewPageModel(
+        // 两条入口共用同一个实例（`DeepScanService` 同时是 `DeepScanSource` 与
+        // `ConfirmedToolScanning`）：这样「规则配上了没有」与「报告是从哪来的」
+        // 不可能分叉——它们本来就是同一次装配的两面。
+        let service = DeepScanService.standard(homeDirectory: homeDirectory)
+        return OverviewPageModel(
             store: store,
-            scanner: scanner ?? DeepScanService.standard(homeDirectory: homeDirectory),
+            scanner: scanner ?? service,
             capacityReader: capacityReader,
             homeDirectory: homeDirectory,
+            issueSource: issueSource ?? service,
             language: language,
             // 生产：深扫本机实测约 31G / 数万文件，跑在后台，界面不被冻住（issue #21）。
             scheduler: .background()
@@ -93,6 +117,9 @@ public final class OverviewPageModel: ObservableObject {
     /// **扫描不在调用线程上跑**（issue #21）。扫描期间**不清空已有结果**：
     /// 上一轮的数字原样留在界面上，用户点「重新扫描」不会看到页面先空一下（验收 6）。
     /// 扫描进行中重复调用直接忽略，不排队第二次扫描。
+    ///
+    /// **运行级问题存在时根本不扫**（ticket #32）：先问 `issueSource`，没有可用规则就
+    /// 直接带着问题收工——没有可判定的分类时，扫出来的数字一个都解释不了。
     public func load() {
         guard !state.isScanning else { return }
 
@@ -112,7 +139,11 @@ public final class OverviewPageModel: ObservableObject {
 
         scheduler.runScan { [weak self] in
             guard let self else { return }
-            let report = self.scanner.scan(records)
+            // 运行级问题先问，而且要**先于**扫描（ticket #32）：规则资源没配上时
+            // 根本没有可判定的分类，扫出来的每个数字都无从解释——那就不扫。
+            // 本机实测 31G / 数万文件的递归不该为了在界面上摆一排 0 而跑一遍。
+            let issues = self.issueSource.issues()
+            let report = issues.isEmpty ? self.scanner.scan(records) : nil
             // 容量与深扫在同一段后台工作里读：界面线程上只剩「换状态」。
             //
             // 读的是**已确认工具所在的卷**（ticket #24）：数据在哪个卷上，剩余空间就得读哪个卷，
@@ -122,6 +153,9 @@ public final class OverviewPageModel: ObservableObject {
             let capacity = self.capacityReader.capacity(ofVolumeContaining: capacityPath)
             self.scheduler.runOnMain { [weak self] in
                 guard let self else { return }
+                self.state.issues = issues
+                // 有运行级问题时报告一律为 `nil`：上一轮的数字属于「规则好好的那次」，
+                // 这一轮没有可判定的分类，撤下来比继续摆着诚实（ticket #32）。
                 self.state.report = report
                 self.state.capacity = capacity
                 self.state.hasLoaded = true
@@ -136,14 +170,41 @@ public final class OverviewPageModel: ObservableObject {
         load()
     }
 
+    // MARK: - 运行级问题（ticket #32）
+
+    /// 这次运行的运行级问题的可读说明：规则没载入、规则全被准入拒绝。
+    ///
+    /// 空数组表示规则好好的、占用照常展示。非空时页面**一个占用数字都不摆**——
+    /// 「这些工具没被扫过」与「这些工具占 0 B」是两件事，混起来就是假话
+    /// （PRD §9 如实展示；issue #15 记录的打包风险会让这种情况真实发生）。
+    ///
+    /// 逐条可读的说明由 `DeepScanIssue` 的两个情形各给一条文案，与分类明细页同一条纪律：
+    /// 问题要说出来，而不是把它变成一排 0。
+    public var issueTexts: [String] {
+        state.issues.map { issue in
+            switch issue {
+            case .noRulesLoaded:
+                return L10n.text(.overviewIssueNoRules, language: language)
+            case let .noUsableRules(rejectedCount):
+                return L10n.format(.overviewIssueRulesRejected, ["\(rejectedCount)"], language: language)
+            }
+        }
+    }
+
     // MARK: - 空状态（验收 5）
 
-    /// 是否该显示空状态：**第一轮扫描完成之后**且没有任何已确认工具。
+    /// 是否该显示空状态：**第一轮扫描完成之后**、没有任何已确认工具、**且这次运行没有
+    /// 运行级问题**。
+    ///
+    /// 第三个条件（ticket #32）与分类明细页同一条纪律：规则没配上时的空候选不是
+    /// 「你还没确认工具」，对着一台装了工具的机器说这句话是误导。
     public var isEmpty: Bool {
-        state.hasLoaded && state.confirmedToolCount == 0
+        state.hasLoaded && state.confirmedToolCount == 0 && state.issues.isEmpty
     }
 
     /// 空状态的引导文案：告诉用户去哪儿确认工具，而不是摆一排 0。
+    ///
+    /// 有运行级问题时为 `nil`——那不是空状态（见 `issueTexts`）。
     public var emptyGuidanceText: String? {
         isEmpty ? L10n.text(.overviewEmptyNoTools, language: language) : nil
     }
@@ -247,9 +308,14 @@ public final class OverviewPageModel: ObservableObject {
 
     // MARK: - 内部
 
-    /// 空状态下一律不给数字：`report` 里可能还留着上一轮的结果（例如用户刚移出全部工具）。
+    /// 可以摆给用户看的那份报告；`nil` 表示**一个占用数字都不许出现**。
+    ///
+    /// 三种情况一律不给数字：运行级问题（规则没配上，根本没扫过）、空状态
+    /// （`report` 里可能还留着上一轮的结果，例如用户刚移出全部工具）、还没有任何报告。
+    /// 宁可整块不显示，也不显示 0——「没扫过」被读成「占 0 B」就是这个页面最不该犯的错。
     private var visibleReport: DeepScanReport? {
-        isEmpty ? nil : state.report
+        guard state.issues.isEmpty else { return nil }
+        return isEmpty ? nil : state.report
     }
 
     private func categoryRow(_ line: CategoryOccupancyLine) -> OverviewCategoryRow {

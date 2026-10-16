@@ -133,6 +133,8 @@
 "overview.disk.unknown.notReported" = "磁盘剩余空间未知：系统没有报告这个卷的容量，这里不显示数字。";
 "overview.action.archive" = "开始归档";
 "overview.archive.disabledReason" = "归档能力还没落地（属于下一个里程碑）。本阶段只读取元数据，不会写入、移动或删除任何文件。";
+"overview.issue.noRules" = "没有加载到任何内置规则文件，因此这些工具还没被扫描过——这里的占用是「未知」，不是 0 B。请确认打包时把规则资源一并放进了应用包。";
+"overview.issue.rulesRejected" = "加载到 %@ 条规则，但全部未通过规则集准入（保护单调性校验），因此这些工具还没被扫描过——这里的占用是「未知」，不是 0 B。请检查内置规则文件是否被改动。";
 "overview.accessibility.total" = "总占用 %1$@，共 %2$@ 个文件";
 "overview.accessibility.category" = "%1$@：%2$@，%3$@";
 "overview.accessibility.tool" = "%1$@，路径 %2$@，占用 %3$@，可归档 %4$@，占 %5$@";

@@ -12,10 +12,19 @@ import AIMacCleanDomain
 /// `report` 只在**新结果回来时**替换：`isScanning` 为真时它仍是上一轮的结果，
 /// 因此界面不会在扫描期间空成一张白纸（验收 6）。第一轮扫描完成前它是 `nil`，
 /// 此时界面只显示「正在扫描」，不显示任何 0。
+///
+/// ## 运行级问题与「空状态」是两件事（ticket #32）
+///
+/// `issues` 非空表示**软件自己没配好**（规则资源没加载到、规则全被准入拒绝）：
+/// 这时页面要说清原因，而不是把一台台工具摆成 0 B。它与「规则好好的、只是还没确认过
+/// 任何工具」完全分开——后者才是空状态（`isEmpty`），前者连扫都没扫过。
 public struct OverviewPageState: Equatable {
 
     /// 上一轮（或当前）深扫结果。`nil` 表示还没有任何结果。
     public var report: DeepScanReport?
+
+    /// 这次运行的运行级问题（规则没载入、规则全被拒绝）。
+    public var issues: [DeepScanIssue]
 
     /// 读到 / 注入的卷容量。`nil` 表示还没读过——界面据此不显示磁盘那一行，
     /// 而不是显示一个「未知」或 0（`VolumeCapacity` 已经把这两种事实分开）。
@@ -32,12 +41,14 @@ public struct OverviewPageState: Equatable {
 
     public init(
         report: DeepScanReport? = nil,
+        issues: [DeepScanIssue] = [],
         capacity: VolumeCapacity? = nil,
         hasLoaded: Bool = false,
         isScanning: Bool = false,
         confirmedToolCount: Int = 0
     ) {
         self.report = report
+        self.issues = issues
         self.capacity = capacity
         self.hasLoaded = hasLoaded
         self.isScanning = isScanning

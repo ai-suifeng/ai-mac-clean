@@ -47,6 +47,7 @@ final class OverviewPageModelTests: XCTestCase {
             scanner: scanner,
             capacityReader: StubCapacityReader(reading: capacity),
             homeDirectory: fixture.homePath,
+            issueSource: StubIssueSource(),
             language: language,
             scheduler: .immediate
         )
@@ -57,16 +58,67 @@ final class OverviewPageModelTests: XCTestCase {
     private func makeEmptyModel(
         capacity: VolumeCapacity = .measured(availableBytes: 137_438_953_472, totalBytes: 1_099_511_627_776)
     ) throws -> (model: OverviewPageModel, fixture: OverviewPageFixture) {
-        let fixture = try OverviewPageFixture(named: "overview-empty")
+        let (model, _, fixture) = try makeEmptyModelWithIssues([], capacity: capacity)
+        return (model, fixture)
+    }
+
+    /// 空状态（没有任何已确认工具）+ 可指定的规则状况。
+    private func makeEmptyModelWithIssues(
+        _ issues: [DeepScanIssue],
+        capacity: VolumeCapacity = .measured(availableBytes: 137_438_953_472, totalBytes: 1_099_511_627_776)
+    ) throws -> (model: OverviewPageModel, issueSource: StubIssueSource, fixture: OverviewPageFixture) {
+        let fixture = try OverviewPageFixture(named: "overview-empty-issues")
+        let issueSource = StubIssueSource(issues)
         let model = OverviewPageModel(
             store: fixture.store,
             scanner: StubOccupancyScanner(report: OverviewFixture.report([])),
             capacityReader: StubCapacityReader(reading: capacity),
             homeDirectory: fixture.homePath,
+            issueSource: issueSource,
             scheduler: .immediate
         )
         model.load()
-        return (model, fixture)
+        return (model, issueSource, fixture)
+    }
+
+    /// 规则没配上时的概览页：一台已确认工具 + 运行级问题。
+    ///
+    /// 深扫替身刻意给一份**非零**的假报告：真正的纪律是「运行级问题出现时一个占用数字都不摆」，
+    /// 而不是「报告恰好是空的」。模型在有问题时根本不该叫深扫（`scanCount == 0`），
+    /// 因此这份报告连被使用的机会都没有。
+    private func makeIssueModel(
+        issues: [DeepScanIssue],
+        language: AppLanguage? = nil
+    ) throws -> (
+        model: OverviewPageModel,
+        scanner: StubOccupancyScanner,
+        issueSource: StubIssueSource,
+        fixture: OverviewPageFixture
+    ) {
+        let fixture = try OverviewPageFixture(named: "overview-issues")
+        try fixture.confirm(id: "claude-code", root: fixture.toolRoot(".claude"))
+
+        let scanner = StubOccupancyScanner(report: OverviewFixture.report([
+            OverviewFixture.toolReport(
+                id: "claude-code",
+                displayName: "Claude Code",
+                toolRootPath: fixture.toolRoot(".claude"),
+                bytes: [.archivableSession: 10_485_760],
+                fileCounts: [.archivableSession: 3]
+            ),
+        ]))
+        let issueSource = StubIssueSource(issues)
+        let model = OverviewPageModel(
+            store: fixture.store,
+            scanner: scanner,
+            capacityReader: StubCapacityReader(reading: .measured(availableBytes: 1_024, totalBytes: 2_048)),
+            homeDirectory: fixture.homePath,
+            issueSource: issueSource,
+            language: language,
+            scheduler: .immediate
+        )
+        model.load()
+        return (model, scanner, issueSource, fixture)
     }
 
     // MARK: - 验收 1：总占用、四类分列、各工具占用
@@ -197,6 +249,7 @@ final class OverviewPageModelTests: XCTestCase {
             scanner: scanner,
             capacityReader: StubCapacityReader(reading: .measured(availableBytes: 1_000, totalBytes: 2_000)),
             homeDirectory: fixture.homePath,
+            issueSource: StubIssueSource(),
             scheduler: .immediate
         )
 
@@ -242,6 +295,7 @@ final class OverviewPageModelTests: XCTestCase {
             ])),
             capacityReader: StubCapacityReader(reading: .measured(availableBytes: 1_000, totalBytes: 2_000)),
             homeDirectory: fixture.homePath,
+            issueSource: StubIssueSource(),
             scheduler: .immediate
         )
 
@@ -312,6 +366,142 @@ final class OverviewPageModelTests: XCTestCase {
         XCTAssertNil(model.archivableShareText, "更不许显示 100% 这种假占比")
         XCTAssertTrue(model.categoryRows.isEmpty)
         XCTAssertTrue(model.toolRows.isEmpty)
+        XCTAssertTrue(model.issueTexts.isEmpty, "规则好好的：不许把「还没确认工具」报成规则问题")
+    }
+
+    // MARK: - 运行级问题：规则没配上时说清原因，不摆 0 B（ticket #32）
+
+    /// 规则没打进包 + 一台已确认工具：必须说「没扫过」，而不是摆一台「0 B」的工具。
+    ///
+    /// `Bundle.module` 的规则资源漏打包时（issue #15 记录的风险）就是这样：
+    /// 候选与占用都会是空的，但那不是用户的机器上没装工具。
+    func test规则没加载到时给出提示且一个占用数字都不显示() throws {
+        let (model, scanner, issueSource, fixture) = try makeIssueModel(issues: [.noRulesLoaded])
+        defer { fixture.remove() }
+
+        XCTAssertEqual(model.issueTexts, [
+            "没有加载到任何内置规则文件，因此这些工具还没被扫描过——这里的占用是「未知」，不是 0 B。"
+                + "请确认打包时把规则资源一并放进了应用包。",
+        ])
+        XCTAssertNil(model.totalText, "未扫描 ≠ 占 0 B：宁可什么都不显示")
+        XCTAssertNil(model.totalAccessibilityText)
+        XCTAssertNil(model.archivableShareText)
+        XCTAssertTrue(model.categoryRows.isEmpty)
+        XCTAssertTrue(model.toolRows.isEmpty, "任何工具行都会摆出一个「0 B（0 个文件）」")
+        XCTAssertNil(model.emptyGuidanceText, "规则没配上时，「先去确认工具」是误导：不是空状态")
+        XCTAssertFalse(model.isEmpty, "有已确认工具，这不是空状态")
+        XCTAssertEqual(issueSource.issuesCallCount, 1, "先问问题")
+        XCTAssertEqual(scanner.scanCount, 0, "没有可判定的分类就不扫：31G 的递归不该为摆一排 0 而跑")
+        XCTAssertEqual(scanner.receivedRecords, [])
+    }
+
+    /// 规则读到了但一条都没过准入：文案要带上被拒条数，同样不摆占用。
+    func test规则全部被拒时提示带上被拒条数且不显示占用() throws {
+        let (model, scanner, _, fixture) = try makeIssueModel(issues: [.noUsableRules(rejectedCount: 7)])
+        defer { fixture.remove() }
+
+        XCTAssertEqual(model.issueTexts, [
+            "加载到 7 条规则，但全部未通过规则集准入（保护单调性校验），因此这些工具还没被扫描过——"
+                + "这里的占用是「未知」，不是 0 B。请检查内置规则文件是否被改动。",
+        ])
+        XCTAssertNil(model.totalText)
+        XCTAssertTrue(model.toolRows.isEmpty)
+        XCTAssertTrue(model.categoryRows.isEmpty)
+        XCTAssertEqual(scanner.scanCount, 0)
+    }
+
+    /// 两条问题都要有英文文案：概览页在英文界面上也必须说英文。
+    func test运行级问题文案中英文都有且都不显示占用() throws {
+        for language in [AppLanguage.simplifiedChinese, .english] {
+            let (model, _, _, fixture) = try makeIssueModel(issues: [.noRulesLoaded], language: language)
+            defer { fixture.remove() }
+
+            let text = try XCTUnwrap(model.issueTexts.first)
+            XCTAssertNotEqual(text, L10n.Key.overviewIssueNoRules.rawValue, "不许把 key 甩给用户")
+            XCTAssertNotEqual(text, L10n.Key.overviewIssueRulesRejected.rawValue)
+            XCTAssertNil(model.totalText)
+            XCTAssertTrue(model.toolRows.isEmpty)
+        }
+
+        XCTAssertNotEqual(
+            L10n.text(.overviewIssueNoRules, language: .simplifiedChinese),
+            L10n.text(.overviewIssueNoRules, language: .english)
+        )
+        XCTAssertNotEqual(
+            L10n.text(.overviewIssueRulesRejected, language: .simplifiedChinese),
+            L10n.text(.overviewIssueRulesRejected, language: .english)
+        )
+    }
+
+    /// 反过来：规则可用、只是还没有任何已确认工具时，照常走空状态引导——
+    /// 「空候选」与「规则没配上」必须分得开（验收 2）。
+    func test规则正常时没有任何已确认工具仍走空状态引导() throws {
+        let (model, issueSource, fixture) = try makeEmptyModelWithIssues([])
+        defer { fixture.remove() }
+
+        XCTAssertTrue(model.issueTexts.isEmpty)
+        XCTAssertTrue(model.isEmpty)
+        XCTAssertNotNil(model.emptyGuidanceText, "规则正常：这句引导是给用户的路")
+        XCTAssertEqual(issueSource.issuesCallCount, 1)
+    }
+
+    /// 有运行级问题时，即使工具数不为 0 也不许把「先确认工具」那句引导摆出来。
+    func test有运行级问题时不再摆空状态引导() throws {
+        let fixture = try OverviewPageFixture(named: "overview-issues-no-guidance")
+        defer { fixture.remove() }
+
+        let model = OverviewPageModel(
+            store: fixture.store,
+            scanner: StubOccupancyScanner(report: OverviewFixture.report([])),
+            capacityReader: StubCapacityReader(reading: .measured(availableBytes: 1_024, totalBytes: 2_048)),
+            homeDirectory: fixture.homePath,
+            issueSource: StubIssueSource([.noRulesLoaded]),
+            scheduler: .immediate
+        )
+        model.load()
+
+        XCTAssertNil(model.emptyGuidanceText)
+        XCTAssertEqual(model.issueTexts.count, 1)
+        XCTAssertNil(model.totalText)
+    }
+
+    /// 上一轮数字属于「规则好好的那次」：这次规则失效后不许继续摆着。
+    func test重新扫描时规则失效要把上一轮的数字撤下来() throws {
+        let fixture = try OverviewPageFixture(named: "overview-issues-after-scan")
+        defer { fixture.remove() }
+        try fixture.confirm(id: "claude-code", root: fixture.toolRoot(".claude"))
+
+        let scanner = StubOccupancyScanner(report: OverviewFixture.report([
+            OverviewFixture.toolReport(
+                id: "claude-code",
+                displayName: "Claude Code",
+                toolRootPath: fixture.toolRoot(".claude"),
+                bytes: [.archivableSession: 10_485_760],
+                fileCounts: [.archivableSession: 1]
+            ),
+        ]))
+        let issueSource = StubIssueSource()
+        let model = OverviewPageModel(
+            store: fixture.store,
+            scanner: scanner,
+            capacityReader: StubCapacityReader(reading: .measured(availableBytes: 1_024, totalBytes: 2_048)),
+            homeDirectory: fixture.homePath,
+            issueSource: issueSource,
+            scheduler: .immediate
+        )
+
+        model.load()
+        XCTAssertEqual(model.totalText, "总占用：10 MB（1 个文件）", "第一轮：规则好好的，照常显示")
+        XCTAssertEqual(scanner.scanCount, 1)
+
+        // 规则资源没了（打包漏了 / 被清理工具删了）：这一轮没有可判定的分类。
+        issueSource.reportedIssues = [.noRulesLoaded]
+        model.reload()
+
+        XCTAssertNil(model.totalText, "运行级问题出现后，上一轮的数字必须撤下来")
+        XCTAssertTrue(model.toolRows.isEmpty)
+        XCTAssertEqual(model.issueTexts.count, 1)
+        XCTAssertEqual(scanner.scanCount, 1, "第二轮没有规则可依：不该再扫一遍")
     }
 
     // MARK: - 验收 7：磁盘剩余空间（含未知）
@@ -365,6 +555,7 @@ final class OverviewPageModelTests: XCTestCase {
             scanner: StubOccupancyScanner(report: OverviewFixture.report([])),
             capacityReader: reader,
             homeDirectory: fixture.homePath,
+            issueSource: StubIssueSource(),
             scheduler: .immediate
         )
         model.load()
@@ -389,6 +580,7 @@ final class OverviewPageModelTests: XCTestCase {
             scanner: StubOccupancyScanner(report: OverviewFixture.report([])),
             capacityReader: reader,
             homeDirectory: fixture.homePath,
+            issueSource: StubIssueSource(),
             scheduler: .immediate
         )
         model.load()

@@ -130,6 +130,8 @@
 "overview.disk.unknown.notReported" = "Free disk space unknown: the system did not report this volume's capacity, so no number is shown here.";
 "overview.action.archive" = "Start Archiving";
 "overview.archive.disabledReason" = "Archiving is not implemented yet (it belongs to the next milestone). This milestone only reads metadata and never writes, moves or deletes any file.";
+"overview.issue.noRules" = "No built-in rule files were loaded, so these tools were never scanned — their occupancy is unknown here, not 0 B. Check that the packaged app embeds the rules resources.";
+"overview.issue.rulesRejected" = "%@ rule file(s) were loaded, but none of them passed rule-set admission (the protection-monotonicity check), so these tools were never scanned — their occupancy is unknown here, not 0 B. Check whether the built-in rule files were modified.";
 "overview.accessibility.total" = "Total occupancy %1$@, %2$@ files";
 "overview.accessibility.category" = "%1$@: %2$@, %3$@";
 "overview.accessibility.tool" = "%1$@, path %2$@, occupancy %3$@, archivable %4$@, share %5$@";
