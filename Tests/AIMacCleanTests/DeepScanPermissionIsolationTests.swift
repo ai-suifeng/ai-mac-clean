@@ -54,7 +54,7 @@ final class DeepScanPermissionIsolationTests: XCTestCase {
             }
         }
 
-        let scan = try makeScanner().scan(
+        let scan = makeScanner().scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -113,7 +113,7 @@ final class DeepScanPermissionIsolationTests: XCTestCase {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
         }
 
-        let scan = try makeScanner().scan(
+        let scan = makeScanner().scan(
             tools: fixture.scanInputs([codex, cursor]),
             rules: [codex.rule, cursor.rule],
             homeDirectory: fixture.rootPath
@@ -145,7 +145,7 @@ final class DeepScanPermissionIsolationTests: XCTestCase {
         )
         try fixture.write("codex/projects/-a/22222222-2222-2222-2222-222222222222.jsonl", bytes: 4096)
 
-        let scan = try makeScanner(fileSystem).scan(
+        let scan = makeScanner(fileSystem).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath

@@ -23,12 +23,15 @@ import AIMacCleanRules
 /// 分类映射来自规则文件的 `classification[{pattern, category}]`。规则没有声明到的路径
 /// 落进**不确定**，绝不默认算作可归档（`CategoryProvenance.undeclared`）。
 /// 受保护判定另外复用 `BuiltInProtectedPaths`（按链接真实目标），规则只展示、不改判。
+/// 接口刻意**不抛错**：扫描本身不会因为某个位置读不到而失败——那些位置按目录粒度
+/// 进 `unreadable`（PRD §4.4）。一个会抛错的签名会诱使调用方把「读不到」升级成
+/// 「整次扫描失败」，而这正是本票要避免的。
 public protocol DeepScanning {
     func scan(
         tools: [ConfirmedTool],
         rules: [ToolRule],
         homeDirectory: String
-    ) throws -> DeepScanReport
+    ) -> DeepScanReport
 }
 
 /// 深扫器的默认实现。
@@ -63,7 +66,7 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
         rules: [ToolRule],
         homeDirectory: String,
         options: DeepScanOptions = DeepScanOptions()
-    ) throws -> DeepScanReport {
+    ) -> DeepScanReport {
         let results = scanTools(tools, rules: rules, homeDirectory: homeDirectory, options: options)
         // 固定按工具标识排序：并行下完成顺序不确定，而结果必须确定（验收 7）。
         return DeepScanReport(toolReports: results.sorted { $0.toolID < $1.toolID })
@@ -73,8 +76,8 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
         tools: [ConfirmedTool],
         rules: [ToolRule],
         homeDirectory: String
-    ) throws -> DeepScanReport {
-        try scan(tools: tools, rules: rules, homeDirectory: homeDirectory, options: DeepScanOptions())
+    ) -> DeepScanReport {
+        scan(tools: tools, rules: rules, homeDirectory: homeDirectory, options: DeepScanOptions())
     }
 
     // MARK: - 并发

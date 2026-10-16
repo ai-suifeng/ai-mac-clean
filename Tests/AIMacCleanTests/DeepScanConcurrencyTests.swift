@@ -50,13 +50,13 @@ final class DeepScanConcurrencyTests: XCTestCase {
         let domain = try makeFixture(named: "concurrency-parity")
         defer { domain.fixture.remove() }
 
-        let serial = try DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
+        let serial = DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
             tools: domain.inputs(),
             rules: domain.rules(),
             homeDirectory: domain.fixture.rootPath,
             options: .serial
         )
-        let parallel = try DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
+        let parallel = DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
             tools: domain.inputs(),
             rules: domain.rules(),
             homeDirectory: domain.fixture.rootPath,
@@ -82,7 +82,7 @@ final class DeepScanConcurrencyTests: XCTestCase {
 
         let options = DeepScanOptions(maxConcurrentTools: 4)
         let runs = try (0..<5).map { _ in
-            try DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
+            DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
                 tools: domain.inputs(),
                 rules: domain.rules(),
                 homeDirectory: domain.fixture.rootPath,
@@ -107,7 +107,7 @@ final class DeepScanConcurrencyTests: XCTestCase {
             root: domain.fixture.rootPath,
             delay: 0.02
         )
-        let report = try DeepScanner(fileSystem: parallel).scan(
+        let report = DeepScanner(fileSystem: parallel).scan(
             tools: domain.inputs(),
             rules: domain.rules(),
             homeDirectory: domain.fixture.rootPath,
@@ -127,7 +127,7 @@ final class DeepScanConcurrencyTests: XCTestCase {
             root: domain.fixture.rootPath,
             delay: 0.02
         )
-        let serialReport = try DeepScanner(fileSystem: serial).scan(
+        let serialReport = DeepScanner(fileSystem: serial).scan(
             tools: domain.inputs(),
             rules: domain.rules(),
             homeDirectory: domain.fixture.rootPath,
@@ -147,7 +147,7 @@ final class DeepScanConcurrencyTests: XCTestCase {
             root: domain.fixture.rootPath,
             delay: 0.02
         )
-        _ = try DeepScanner(fileSystem: probe).scan(
+        _ = DeepScanner(fileSystem: probe).scan(
             tools: [domain.tools[0].requested],
             rules: [domain.tools[0].rule],
             homeDirectory: domain.fixture.rootPath,
@@ -161,13 +161,13 @@ final class DeepScanConcurrencyTests: XCTestCase {
         defer { domain.fixture.remove() }
 
         let single = [domain.tools[1]]
-        let serial = try DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
+        let serial = DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
             tools: single.map(\.requested),
             rules: single.map(\.rule),
             homeDirectory: domain.fixture.rootPath,
             options: .serial
         )
-        let parallel = try DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
+        let parallel = DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
             tools: single.map(\.requested),
             rules: single.map(\.rule),
             homeDirectory: domain.fixture.rootPath,

@@ -48,7 +48,7 @@ final class DeepScanProtectedPathTests: XCTestCase {
         try fixture.write("codex/sessions/2026/10/14/rollout-1.jsonl.zst", bytes: 4096)
 
         let auditor = AuditorFileSystem()
-        let scan = try makeScanner(auditor).scan(
+        let scan = makeScanner(auditor).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -109,7 +109,7 @@ final class DeepScanProtectedPathTests: XCTestCase {
         )
 
         let recorder = RecordingDiscoveryFileSystem()
-        let scan = try makeScanner(recorder).scan(
+        let scan = makeScanner(recorder).scan(
             tools: [fixture.confirmed(harness)],
             rules: [harness.rule],
             homeDirectory: fixture.rootPath
@@ -173,7 +173,7 @@ final class DeepScanProtectedPathTests: XCTestCase {
             to: fixture.root.appendingPathComponent(".agents/skills").path
         )
 
-        let scan = try makeScanner(RecordingDiscoveryFileSystem()).scan(
+        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(harness)],
             rules: [harness.rule],
             homeDirectory: fixture.rootPath
@@ -216,7 +216,7 @@ final class DeepScanProtectedPathTests: XCTestCase {
         )
 
         let recorder = RecordingDiscoveryFileSystem()
-        let scan = try makeScanner(recorder).scan(
+        let scan = makeScanner(recorder).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -256,7 +256,7 @@ final class DeepScanProtectedPathTests: XCTestCase {
         try fixture.write(".agents/skills/shared.md", bytes: 32)
 
         let recorder = RecordingDiscoveryFileSystem()
-        let scan = try makeScanner(recorder).scan(
+        let scan = makeScanner(recorder).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath

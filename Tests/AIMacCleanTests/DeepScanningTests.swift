@@ -66,7 +66,7 @@ final class DeepScanningTests: XCTestCase {
         try fixture.write("codex/.tmp/stale.dat", bytes: 256)
         try fixture.write("codex/config.toml", bytes: 64)
 
-        let scan = try makeScanner(RecordingDiscoveryFileSystem()).scan(
+        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -88,7 +88,7 @@ final class DeepScanningTests: XCTestCase {
         try fixture.write("codex/projects/p/b.jsonl", bytes: 200)
 
         let recorder = RecordingDiscoveryFileSystem()
-        let scan = try makeScanner(recorder).scan(
+        let scan = makeScanner(recorder).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -119,7 +119,7 @@ final class DeepScanningTests: XCTestCase {
         }
 
         let auditor = AuditorFileSystem()
-        let scan = try makeScanner(auditor).scan(
+        let scan = makeScanner(auditor).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -143,7 +143,7 @@ final class DeepScanningTests: XCTestCase {
         try fixture.write("codex/.tmp/stale-2.dat", bytes: 40)
         try fixture.write("codex/weird/mystery.bin", bytes: 77)
 
-        let scan = try makeScanner(RecordingDiscoveryFileSystem()).scan(
+        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -186,7 +186,7 @@ final class DeepScanningTests: XCTestCase {
         try fixture.write("codex/projects/-Users-x-b/22222222-2222-2222-2222-222222222222.jsonl", bytes: 256)
         try fixture.write("codex/.tmp/nested/deeper/stale.dat", bytes: 32)
 
-        let scan = try makeScanner(RecordingDiscoveryFileSystem()).scan(
+        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -214,7 +214,7 @@ final class DeepScanningTests: XCTestCase {
         try fixture.write("codex/unknown-place/notes.txt", bytes: 10)
         try fixture.write("codex/another.jsonl", bytes: 20)
 
-        let scan = try makeScanner(RecordingDiscoveryFileSystem()).scan(
+        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -266,7 +266,7 @@ final class DeepScanningTests: XCTestCase {
         try fixture.write("codex/projects/p/a.jsonl", bytes: 60)
         try fixture.write("codex/.tmp/x.dat", bytes: 8)
 
-        let scan = try makeScanner(RecordingDiscoveryFileSystem()).scan(
+        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath
@@ -291,7 +291,7 @@ final class DeepScanningTests: XCTestCase {
         let codex = try tool(fixture)
         let ghost = ConfirmedTool(id: "ghost", displayName: "Ghost", toolRootPath: fixture.rootPath + "/ghost")
 
-        let scan = try makeScanner(RecordingDiscoveryFileSystem()).scan(
+        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex), ghost],
             rules: [codex.rule],
             homeDirectory: fixture.rootPath

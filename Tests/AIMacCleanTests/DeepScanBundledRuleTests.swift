@@ -66,7 +66,7 @@ final class DeepScanBundledRuleTests: XCTestCase {
         ]
 
         let auditor = AuditorFileSystem()
-        let scan = try DeepScanner(fileSystem: auditor).scan(
+        let scan = DeepScanner(fileSystem: auditor).scan(
             tools: tools,
             rules: rules,
             homeDirectory: fixture.rootPath
@@ -153,7 +153,7 @@ final class DeepScanBundledRuleTests: XCTestCase {
             toolRootPath: fixture.rootPath + "/mystery-tool"
         )
 
-        let scan = try DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
+        let scan = DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
             tools: [ghost],
             rules: try admittedBundledRules(),
             homeDirectory: fixture.rootPath
