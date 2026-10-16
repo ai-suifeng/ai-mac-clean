@@ -208,7 +208,9 @@ final class ProtectedPathContextTests: XCTestCase {
         defer { tree.fixture.remove() }
 
         let paths = probePaths(tree)
-        let repetitions = 40
+        // 只跑 8 轮：逐次判定一侧每次都真的读盘（约 2ms/次），轮数再多只是让测试变慢，
+        // 而「随判定次数线性增长」与「一次展开后不再增长」的对比 8 轮已经足够清楚。
+        let repetitions = 8
 
         let legacyListing = RecordingProtectedPathDirectoryListing()
         for _ in 0..<repetitions {
