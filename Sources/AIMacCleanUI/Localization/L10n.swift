@@ -178,8 +178,10 @@ public enum L10n {
 
     /// 按指定语言取文案。
     ///
-    /// - Parameter language: `nil` 表示跟随系统语言；无论系统语言是什么，
-    ///   取不到时都回落到简体中文，不把 key 显示给用户。
+    /// - Parameter language: `nil` 表示不指定语言，取**基准语言**（简体中文，见
+    ///   `Package.swift` 的 `defaultLocalization`）；界面要显示英文时必须显式传
+    ///   `.english`（页面模型都接一个 `language` 参数，生产接线负责传值）。
+    ///   无论哪种情况，取不到时都回落到简体中文，不把 key 显示给用户。
     public static func text(_ key: Key, language: AppLanguage?) -> String {
         if let language, let bundle = catalogBundle(for: language) {
             let value = bundle.localizedString(forKey: key.rawValue, value: missingSentinel, table: tableName)

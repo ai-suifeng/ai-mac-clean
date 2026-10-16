@@ -57,15 +57,25 @@ final class ClassificationDetailPresentationTests: XCTestCase {
     func test三类不可归档逐字带PRD五点一的处理说明() {
         let zh = detail(ClassificationDetailFixture.claudeCode())
 
-        // 文案逐字取自 PRD §5.1 的「处理」一列，也与领域层同源——
-        // 界面不能自己把「永不触碰」改写成别的话（issue #11 的承诺在界面上兑现）。
+        // 文案逐字取自 PRD §5.1 的「处理」一列，与本地化目录同源
+        // （界面不能自己把「永不触碰」改写成别的话：issue #11 的承诺在界面上兑现）。
         XCTAssertEqual(zh.row(.cacheAndLog)?.handlingText, "只展示大小，不动")
         XCTAssertEqual(zh.row(.protected)?.handlingText, "永不触碰，仅展示")
         XCTAssertEqual(zh.row(.uncertain)?.handlingText, "锁定，仅展示大小")
 
-        XCTAssertEqual(zh.row(.cacheAndLog)?.handlingText, DataCategory.cacheAndLog.handling)
-        XCTAssertEqual(zh.row(.protected)?.handlingText, DataCategory.protected.handling)
-        XCTAssertEqual(zh.row(.uncertain)?.handlingText, DataCategory.uncertain.handling)
+        // 概览页与明细页走同一批 key（`CategoryCopy` → L10n）：不是两套文案碰巧一样。
+        XCTAssertEqual(
+            zh.row(.cacheAndLog)?.handlingText,
+            CategoryCopy.handlingText(for: .cacheAndLog, language: .simplifiedChinese)
+        )
+        XCTAssertEqual(
+            zh.row(.protected)?.handlingText,
+            L10n.text(.classificationHandlingProtected, language: .simplifiedChinese)
+        )
+        XCTAssertEqual(
+            zh.row(.uncertain)?.handlingText,
+            CategoryCopy.handlingText(for: .uncertain, language: .simplifiedChinese)
+        )
 
         let en = detail(ClassificationDetailFixture.claudeCode(), language: .english)
         XCTAssertEqual(en.row(.cacheAndLog)?.handlingText, "Shown only, never touched")

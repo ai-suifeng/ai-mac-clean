@@ -27,6 +27,12 @@ public final class OverviewPageModel: ObservableObject {
     private let capacityReader: any VolumeCapacityReading
     private let homeDirectory: String
 
+    /// 界面语言；`nil` 落到 `L10n` 的基准语言（简体中文）。
+    ///
+    /// 与分类明细页同一条接线：文案不在视图里硬编码，也不在模型里写死中文——
+    /// 四类的名称与处理方式走 `CategoryCopy`（本地化目录），其余文案走 `L10n`。
+    private let language: AppLanguage?
+
     /// 「扫描」与「更新状态」分别跑在哪条线程上（复用 issue #21 的调度点）。
     private let scheduler: DiscoveryScheduler
 
@@ -37,37 +43,44 @@ public final class OverviewPageModel: ObservableObject {
     ///   - store: 确认存储。只读 `confirmedTools`——候选不参与概览。
     ///   - scanner: 深扫入口（生产用 `DeepScanService`，测试给固定报告）。
     ///   - capacityReader: 卷容量读数（生产用 `SystemVolumeCapacityReader`，测试给固定值）。
-    ///   - homeDirectory: 路径缩写用；也是容量读数的那个卷（数据就放在主目录下）。
+    ///   - homeDirectory: 路径缩写用；没有已确认工具时也是容量读数的那个卷。
+    ///   - language: 界面语言；`nil` 跟随 `L10n` 的默认（取不到时落到简体中文）。
     ///   - scheduler: 扫描跑在哪条线程上。默认同步（测试确定），生产用 `.background()`。
     public init(
         store: ConfirmationStore,
         scanner: any ConfirmedToolScanning,
         capacityReader: any VolumeCapacityReading,
         homeDirectory: String,
+        language: AppLanguage? = nil,
         scheduler: DiscoveryScheduler = .immediate
     ) {
         self.store = store
         self.scanner = scanner
         self.capacityReader = capacityReader
         self.homeDirectory = homeDirectory
+        self.language = language
         self.scheduler = scheduler
         self.state = OverviewPageState()
     }
 
     /// 应用启动时用的入口：本机确认存储 + 内置规则深扫 + 系统卷容量读数。
     ///
-    /// - Parameter scanner: 省略时按 `homeDirectory` 建一个标准的 `DeepScanService`。
+    /// - Parameters:
+    ///   - scanner: 省略时按 `homeDirectory` 建一个标准的 `DeepScanService`。
+    ///   - language: 界面语言，透到四类分列与全部固定文案。
     public static func standard(
         store: ConfirmationStore = JSONConfirmationStore.standard(),
         scanner: (any ConfirmedToolScanning)? = nil,
         capacityReader: any VolumeCapacityReading = SystemVolumeCapacityReader(),
-        homeDirectory: String = NSHomeDirectory()
+        homeDirectory: String = NSHomeDirectory(),
+        language: AppLanguage? = nil
     ) -> OverviewPageModel {
         OverviewPageModel(
             store: store,
             scanner: scanner ?? DeepScanService.standard(homeDirectory: homeDirectory),
             capacityReader: capacityReader,
             homeDirectory: homeDirectory,
+            language: language,
             // 生产：深扫本机实测约 31G / 数万文件，跑在后台，界面不被冻住（issue #21）。
             scheduler: .background()
         )
@@ -127,16 +140,16 @@ public final class OverviewPageModel: ObservableObject {
 
     /// 空状态的引导文案：告诉用户去哪儿确认工具，而不是摆一排 0。
     public var emptyGuidanceText: String? {
-        isEmpty ? L10n.text(.overviewEmptyNoTools) : nil
+        isEmpty ? L10n.text(.overviewEmptyNoTools, language: language) : nil
     }
 
     /// 固定文案。
-    public var pageTitle: String { L10n.text(.overviewPageTitle) }
-    public var stageNoteText: String { L10n.text(.overviewStageNote) }
-    public var reloadTitle: String { L10n.text(.overviewReload) }
-    public var categorySectionTitle: String { L10n.text(.overviewSectionCategories) }
-    public var toolSectionTitle: String { L10n.text(.overviewSectionTools) }
-    public var scanningText: String? { state.isScanning ? L10n.text(.overviewScanning) : nil }
+    public var pageTitle: String { L10n.text(.overviewPageTitle, language: language) }
+    public var stageNoteText: String { L10n.text(.overviewStageNote, language: language) }
+    public var reloadTitle: String { L10n.text(.overviewReload, language: language) }
+    public var categorySectionTitle: String { L10n.text(.overviewSectionCategories, language: language) }
+    public var toolSectionTitle: String { L10n.text(.overviewSectionTools, language: language) }
+    public var scanningText: String? { state.isScanning ? L10n.text(.overviewScanning, language: language) : nil }
 
     /// 「重新扫描」的键盘快捷键说明。视图把它挂到按钮上，键盘与鼠标走的是同一个动作
     /// （`reload()`），因此不存在两套语义。与发现与确认页一致用 ⌘R。
@@ -153,7 +166,7 @@ public final class OverviewPageModel: ObservableObject {
         return L10n.format(.overviewTotalValue, [
             ByteSizeDisplay.string(from: report.totalBytes),
             Self.countText(report.totalFileCount),
-        ])
+        ], language: language)
     }
 
     /// 总占用的辅助功能文案（辅助技术也要读得出数字，验收 7）。
@@ -162,7 +175,7 @@ public final class OverviewPageModel: ObservableObject {
         return L10n.format(.overviewAccessibilityTotal, [
             ByteSizeDisplay.string(from: report.totalBytes),
             Self.countText(report.totalFileCount),
-        ])
+        ], language: language)
     }
 
     /// 「可归档占比」文案：占比 + 可归档字节。
@@ -171,12 +184,14 @@ public final class OverviewPageModel: ObservableObject {
         return L10n.format(.overviewArchivableValue, [
             ShareText.string(fromShare: report.archivableShare),
             ByteSizeDisplay.string(from: report.archivableOccupancy.bytes),
-        ])
+        ], language: language)
     }
 
     /// 四类分列（全体工具逐类求和）。
+    ///
+    /// 名称与处理方式走 `CategoryCopy`（本地化目录里的同一批 key），与分类明细页同源。
     public var categoryRows: [OverviewCategoryRow] {
-        visibleReport?.categoryLines.map(Self.categoryRow) ?? []
+        visibleReport?.categoryLines.map(categoryRow) ?? []
     }
 
     /// 各工具占用，**按体积从大到小**排列（同样大小按工具标识，保证顺序稳定）。
@@ -187,7 +202,7 @@ public final class OverviewPageModel: ObservableObject {
                 if lhs.occupancy.bytes != rhs.occupancy.bytes { return lhs.occupancy.bytes > rhs.occupancy.bytes }
                 return lhs.toolID < rhs.toolID
             }
-            .map { Self.toolRow($0, homeDirectory: homeDirectory) }
+            .map { toolRow($0, homeDirectory: homeDirectory) }
     }
 
     // MARK: - 磁盘剩余空间（验收 7）
@@ -203,18 +218,18 @@ public final class OverviewPageModel: ObservableObject {
             return L10n.format(.overviewDiskFree, [
                 ByteSizeDisplay.string(from: availableBytes),
                 ByteSizeDisplay.string(from: totalBytes),
-            ])
+            ], language: language)
         case .unknown(.volumeUnreadable):
-            return L10n.text(.overviewDiskUnknownUnreadable)
+            return L10n.text(.overviewDiskUnknownUnreadable, language: language)
         case .unknown(.capacityNotReported):
-            return L10n.text(.overviewDiskUnknownNotReported)
+            return L10n.text(.overviewDiskUnknownNotReported, language: language)
         }
     }
 
     // MARK: - 主按钮（验收 4）
 
     /// 「开始归档」。
-    public var archiveButtonTitle: String { L10n.text(.overviewArchiveAction) }
+    public var archiveButtonTitle: String { L10n.text(.overviewArchiveAction, language: language) }
 
     /// 主按钮**恒不可用**：归档能力属于 M3。
     ///
@@ -223,7 +238,7 @@ public final class OverviewPageModel: ObservableObject {
     public var archiveButtonIsEnabled: Bool { false }
 
     /// 主按钮为什么不可用（逐字解释，不是一句「暂不可用」）。
-    public var archiveDisabledReason: String { L10n.text(.overviewArchiveDisabledReason) }
+    public var archiveDisabledReason: String { L10n.text(.overviewArchiveDisabledReason, language: language) }
 
     // MARK: - 内部
 
@@ -232,31 +247,37 @@ public final class OverviewPageModel: ObservableObject {
         isEmpty ? nil : state.report
     }
 
-    private static func categoryRow(_ line: CategoryOccupancyLine) -> OverviewCategoryRow {
+    private func categoryRow(_ line: CategoryOccupancyLine) -> OverviewCategoryRow {
         let occupancyText = occupancyText(line.occupancy)
+        let title = CategoryCopy.nameText(for: line.category, language: language)
+        let handling = CategoryCopy.handlingText(for: line.category, language: language)
         return OverviewCategoryRow(
             categoryID: line.categoryID,
-            title: line.displayName,
-            handling: line.handling,
+            title: title,
+            handling: handling,
             occupancyText: occupancyText,
             bytes: line.occupancy.bytes,
             fileCount: line.occupancy.fileCount,
             accessibilityLabel: L10n.format(.overviewAccessibilityCategory, [
-                line.displayName,
+                title,
                 occupancyText,
-                line.handling,
-            ])
+                handling,
+            ], language: language)
         )
     }
 
-    private static func toolRow(_ report: ToolScanReport, homeDirectory: String) -> OverviewToolRow {
+    private func toolRow(_ report: ToolScanReport, homeDirectory: String) -> OverviewToolRow {
         let occupancyText = occupancyText(report.occupancy)
         let displayPath = ToolRootDisplay.abbreviated(report.toolRootPath, homeDirectory: homeDirectory)
         let share = ShareText.string(fromShare: report.archivableShare)
         let archivableSize = ByteSizeDisplay.string(from: report.archivableOccupancy.bytes)
-        let negligible = report.isArchivableShareNegligible ? L10n.text(.overviewToolNegligible) : nil
+        let negligible = report.isArchivableShareNegligible ? L10n.text(.overviewToolNegligible, language: language) : nil
         let displayOnly = report.displayOnlyOccupancy.bytes > 0
-            ? L10n.format(.overviewToolDisplayOnly, [ByteSizeDisplay.string(from: report.displayOnlyOccupancy.bytes)])
+            ? L10n.format(
+                .overviewToolDisplayOnly,
+                [ByteSizeDisplay.string(from: report.displayOnlyOccupancy.bytes)],
+                language: language
+            )
             : nil
 
         // 辅助功能读出同一批事实：名字、路径、占用、可归档、占比，外加两句如实的补充。
@@ -266,7 +287,7 @@ public final class OverviewPageModel: ObservableObject {
             occupancyText,
             archivableSize,
             share,
-        ])
+        ], language: language)
         for extra in [negligible, displayOnly].compactMap({ $0 }) {
             accessibilityLabel += "；" + extra
         }
@@ -278,7 +299,7 @@ public final class OverviewPageModel: ObservableObject {
             occupancyText: occupancyText,
             bytes: report.occupancy.bytes,
             fileCount: report.occupancy.fileCount,
-            archivableText: L10n.format(.overviewToolArchivable, [archivableSize, share]),
+            archivableText: L10n.format(.overviewToolArchivable, [archivableSize, share], language: language),
             negligibleAnnotation: negligible,
             displayOnlyText: displayOnly,
             accessibilityLabel: accessibilityLabel
@@ -286,11 +307,11 @@ public final class OverviewPageModel: ObservableObject {
     }
 
     /// 「1 MB（2 个文件）」。
-    private static func occupancyText(_ occupancy: Occupancy) -> String {
+    private func occupancyText(_ occupancy: Occupancy) -> String {
         L10n.format(.overviewOccupancyValue, [
             ByteSizeDisplay.string(from: occupancy.bytes),
-            countText(occupancy.fileCount),
-        ])
+            Self.countText(occupancy.fileCount),
+        ], language: language)
     }
 
     /// 文件数与 `ByteSizeFormatter` 同一套纪律：**不带千分位分隔符**，任何系统语言下写法一致。

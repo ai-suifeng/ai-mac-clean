@@ -15,7 +15,8 @@ final class OverviewPageModelTests: XCTestCase {
     /// 常规两台工具：Claude Code 1.5 MB（可归档 1 MB），Cursor 768 KB（可归档 0，
     /// 其中 512 KB 来自只展示、绝不归档的根）。
     private func makeModel(
-        capacity: VolumeCapacity = .measured(availableBytes: 137_438_953_472, totalBytes: 1_099_511_627_776)
+        capacity: VolumeCapacity = .measured(availableBytes: 137_438_953_472, totalBytes: 1_099_511_627_776),
+        language: AppLanguage? = nil
     ) throws -> (model: OverviewPageModel, scanner: StubOccupancyScanner, fixture: OverviewPageFixture) {
         let fixture = try OverviewPageFixture(named: "overview-model")
         try fixture.confirm(id: "claude-code", root: fixture.toolRoot(".claude"))
@@ -46,6 +47,7 @@ final class OverviewPageModelTests: XCTestCase {
             scanner: scanner,
             capacityReader: StubCapacityReader(reading: capacity),
             homeDirectory: fixture.homePath,
+            language: language,
             scheduler: .immediate
         )
         model.load()
@@ -100,6 +102,35 @@ final class OverviewPageModelTests: XCTestCase {
             "512 KB（1 个文件）",
         ])
         XCTAssertEqual(rows.first?.accessibilityLabel, "可归档会话：1 MB（2 个文件），支持归档")
+    }
+
+    /// 概览页的四类分列与分类明细页**同源**：类别名与处理方式都取自本地化目录
+    /// （`classification.category.*` / `classification.handling.*`），所以英文界面上
+    /// 概览页也必须说英文——此前它读的是领域层里硬编码的中文，英文界面上照样显示中文。
+    func test四类分列跟随界面语言取本地化目录() throws {
+        let (model, _, fixture) = try makeModel(language: .english)
+        defer { fixture.remove() }
+
+        let rows = model.categoryRows
+        XCTAssertEqual(
+            rows.map(\.title),
+            ["Archivable sessions", "Cache & logs", "Protected", "Uncertain"]
+        )
+        XCTAssertEqual(
+            rows.map(\.handling),
+            ["Archiving supported", "Shown only, never touched", "Never touched, shown only", "Locked, size shown only"]
+        )
+        XCTAssertEqual(rows.first?.accessibilityLabel, "Archivable sessions: 1 MB (2 files), Archiving supported")
+
+        // 与明细页共用同一批 key：不是两套文案碰巧长得一样。
+        XCTAssertEqual(
+            rows.map(\.title),
+            DataCategory.displayOrder.map { CategoryCopy.nameText(for: $0, language: .english) }
+        )
+        XCTAssertEqual(
+            rows.map(\.handling),
+            DataCategory.displayOrder.map { CategoryCopy.handlingText(for: $0, language: .english) }
+        )
     }
 
     func test各工具占用按体积从大到小排列() throws {

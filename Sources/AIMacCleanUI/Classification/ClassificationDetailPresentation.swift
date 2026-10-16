@@ -232,8 +232,11 @@ public enum ClassificationDetailPresenter {
     // MARK: - 文案与数字
 
     /// 一个类别的界面名（PRD §5.1 的「类别」一列）。
+    ///
+    /// 与概览页同源：都走 `CategoryCopy`（文案本体在本地化目录里），
+    /// 两页因此不可能给出两套说法。
     public static func nameText(for category: DataCategory, language: AppLanguage? = nil) -> String {
-        L10n.text(nameKey(for: category), language: language)
+        CategoryCopy.nameText(for: category, language: language)
     }
 
     /// 一个类别的处理方式（PRD §5.1 的「处理」一列，逐字）。
@@ -241,7 +244,7 @@ public enum ClassificationDetailPresenter {
     /// 这三句是**承诺**：缓存与日志「只展示大小，不动」、受保护「永不触碰」、
     /// 不确定「锁定」。界面不得改写、不得省略（诚实展示）。
     public static func handlingText(for category: DataCategory, language: AppLanguage? = nil) -> String {
-        L10n.text(handlingKey(for: category), language: language)
+        CategoryCopy.handlingText(for: category, language: language)
     }
 
     /// 「1234 个文件」。
@@ -274,23 +277,6 @@ public enum ClassificationDetailPresenter {
         return "\(whole).\(String(format: "%02d", fraction))%"
     }
 
-    private static func nameKey(for category: DataCategory) -> L10n.Key {
-        switch category {
-        case .archivableSession: return .classificationCategoryArchivableSession
-        case .cacheAndLog: return .classificationCategoryCacheAndLog
-        case .protected: return .classificationCategoryProtected
-        case .uncertain: return .classificationCategoryUncertain
-        }
-    }
-
-    private static func handlingKey(for category: DataCategory) -> L10n.Key {
-        switch category {
-        case .archivableSession: return .classificationHandlingArchivableSession
-        case .cacheAndLog: return .classificationHandlingCacheAndLog
-        case .protected: return .classificationHandlingProtected
-        case .uncertain: return .classificationHandlingUncertain
-        }
-    }
 }
 
 /// 一台工具的分类明细（界面直接渲染这个值）。

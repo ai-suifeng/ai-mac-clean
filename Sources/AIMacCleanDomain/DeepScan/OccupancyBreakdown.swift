@@ -9,18 +9,15 @@ import AIMacCleanRules
 /// **四行齐全**的固定版式。补齐这一步放在 Domain，界面因此不必认识规则层的
 /// `DataCategory`（UI 只依赖 Domain）。
 ///
-/// 文案取自 `DataCategoryPresentation`——类别名与处理方式是 PRD §5.1 的原话，
-/// 不在两个地方各写一遍。
+/// 这里**不带文案**：类别名与处理方式由界面层的 `CategoryCopy` 从本地化目录取，
+/// 概览页与明细页因此说的是同一句话（同一条文案只有一处）。
 public struct CategoryOccupancyLine: Equatable, Sendable {
 
+    /// 类别本身（四类封闭枚举）。界面据此取文案与列表身份。
+    public let category: DataCategory
+
     /// 类别标识（`DataCategory.rawValue`），供界面做列表身份与测试断言。
-    public let categoryID: String
-
-    /// 类别名（「可归档会话」等）。
-    public let displayName: String
-
-    /// 处理方式（「只展示大小，不动」等）。
-    public let handling: String
+    public var categoryID: String { category.rawValue }
 
     /// 本类的占用；没有数据的类别是 `Occupancy()`（0 字节 / 0 文件），不是缺失。
     public let occupancy: Occupancy
@@ -29,15 +26,11 @@ public struct CategoryOccupancyLine: Equatable, Sendable {
     public let isArchivableNow: Bool
 
     public init(
-        categoryID: String,
-        displayName: String,
-        handling: String,
+        category: DataCategory,
         occupancy: Occupancy,
         isArchivableNow: Bool
     ) {
-        self.categoryID = categoryID
-        self.displayName = displayName
-        self.handling = handling
+        self.category = category
         self.occupancy = occupancy
         self.isArchivableNow = isArchivableNow
     }
@@ -49,9 +42,7 @@ extension ToolScanReport {
     public var categoryLines: [CategoryOccupancyLine] {
         DataCategory.displayOrder.map { category in
             CategoryOccupancyLine(
-                categoryID: category.rawValue,
-                displayName: category.displayName,
-                handling: category.handling,
+                category: category,
                 occupancy: self.category(category)?.occupancy ?? Occupancy(),
                 isArchivableNow: category.isArchivableNow
             )
@@ -89,9 +80,7 @@ extension DeepScanReport {
         DataCategory.displayOrder.map { category in
             let occupancy = Occupancy.sum(toolReports.compactMap { $0.category(category)?.occupancy })
             return CategoryOccupancyLine(
-                categoryID: category.rawValue,
-                displayName: category.displayName,
-                handling: category.handling,
+                category: category,
                 occupancy: occupancy,
                 isArchivableNow: category.isArchivableNow
             )
