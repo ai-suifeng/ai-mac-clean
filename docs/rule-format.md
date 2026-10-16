@@ -193,8 +193,12 @@ report.category(forRelativePath: path, ruleID: id, isBuiltInProtected: isProtect
   （PRD §2.3、§5.4：只展示、绝不动）。
 - **缺失的 `displayOnly` 根静默跳过**：不报错、不进「读不到」清单，也不算这个工具占用的贡献者
   （PRD §5.4「规则容忍缺失」）。
-- **文件形态的根**（`~/.claude.json` 这类）照样进占用，但分类只可能来自内置受保护清单或不确定
+- **文件形态的根**照样进占用，但分类只可能来自内置受保护清单或不确定
   ——规则的模式都相对**根**匹配，某个路径相对它就是它自己，谁也匹配不到它。
+  出厂规则里就有这样一条：claude-code 把 `~/.claude.json` 声明成 `displayOnly` 根，
+  它的字节因此出现在 Claude Code 的占用里（受保护，内置条目 `home/claude-state`），
+  但一个字节都不算可归档。以前只声明 `~/.claude`，这个文件从来没进过任何工具的占用
+  （`DeepScanBundledRuleTests.test出厂规则把主目录的claude状态文件作为文件形态的仅展示根计入占用`）。
 
 ## 自带压缩与会话文件名形态
 
