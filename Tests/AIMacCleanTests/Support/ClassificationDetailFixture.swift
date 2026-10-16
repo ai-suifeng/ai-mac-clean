@@ -151,7 +151,8 @@ enum ClassificationDetailFixture {
                         "shell-snapshots",
                         bytes: ClaudeCode.cacheBytes,
                         files: 12,
-                        pattern: "shell-snapshots/**"
+                        pattern: "shell-snapshots/**",
+                        provenance: .declaredPath("shell-snapshots/**")
                     )
                 ]
             ),

@@ -117,6 +117,13 @@ public enum L10n {
         case classificationHandlingUncertain = "classification.handling.uncertain"
         case classificationArchivableShareLabel = "classification.archivableShare.label"
         case classificationArchivableShareTiny = "classification.archivableShare.tiny"
+        case classificationSummaryTitle = "classification.summary.title"
+        case classificationSummaryRow = "classification.summary.row"
+        case classificationSummaryUndeclared = "classification.summary.undeclared"
+        case classificationSummaryProtectedReason = "classification.summary.protectedReason"
+        case classificationSummaryPattern = "classification.summary.pattern"
+        case classificationSummaryAncestor = "classification.summary.ancestor"
+        case classificationSummaryMore = "classification.summary.more"
     }
 
     /// 按当前系统语言取文案，取不到时落到中文。

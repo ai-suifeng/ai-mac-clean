@@ -137,4 +137,52 @@ final class ClassificationDetailPresentationTests: XCTestCase {
         XCTAssertNil(empty.tinyArchivableShareNotice)
         XCTAssertTrue(empty.categoryRows.isEmpty, "没有数据的类别不留占位空行")
     }
+
+    // MARK: - 子路径明细：受保护的大头要显眼，归属要说得清
+
+    func test受保护的大头按子路径列出并逐条给出归属() {
+        let protected = detail(ClassificationDetailFixture.claudeCode()).row(.protected)
+
+        XCTAssertEqual(protected?.summaries.map(\.subpath), ["plugins", "skills"])
+        XCTAssertEqual(
+            protected?.summaries.map(\.text),
+            ["plugins（247 MB，1200 个文件）", "skills（23 MB，34 个文件）"],
+            "子路径一行一个：路径 + 尺寸 + 文件数，受保护的大头一眼能看到"
+        )
+        XCTAssertEqual(
+            protected?.summaries.first?.attributionText,
+            "内置受保护清单：claude-code/plugins",
+            "内置受保护清单与用户规则是两回事（PRD §8.1），归属必须分开说"
+        )
+        XCTAssertEqual(
+            detail(ClassificationDetailFixture.claudeCode()).row(.uncertain)?.summaries.first?.attributionText,
+            "规则未声明，归入不确定",
+            "规则没声明的路径落进不确定，界面照实说，不假装它是可归档的"
+        )
+        XCTAssertEqual(protected?.hiddenSummaryCount, 0)
+    }
+
+    func test子路径明细按字节数从大到小且只列前五条其余如实计数() {
+        // 输入故意乱序：界面的顺序不该依赖领域层给的顺序。
+        let summaries = (1...7).map { index in
+            ClassificationDetailFixture.summary(
+                "d\(index)",
+                bytes: ClassificationDetailFixture.bytes(Int64(index) * 10),
+                files: index
+            )
+        }
+        let report = ClassificationDetailFixture.report(categories: [
+            ClassificationDetailFixture.category(.cacheAndLog, bytes: ClassificationDetailFixture.bytes(280),
+                                                   files: 28, summaries: summaries)
+        ])
+
+        let row = detail(report).row(.cacheAndLog)
+
+        XCTAssertEqual(row?.summaries.map(\.subpath), ["d7", "d6", "d5", "d4", "d3"])
+        XCTAssertEqual(row?.hiddenSummaryCount, 2, "其余两条只报数量，不静默丢掉")
+        XCTAssertEqual(
+            row?.summaries.first?.attributionText, "规则声明：projects/**",
+            "规则声明的条目要说清是规则声明的（用户能改；内置清单不能）"
+        )
+    }
 }

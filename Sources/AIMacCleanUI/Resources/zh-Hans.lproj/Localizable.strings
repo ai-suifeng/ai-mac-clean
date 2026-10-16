@@ -86,3 +86,10 @@
 "classification.handling.uncertain" = "锁定，仅展示大小";
 "classification.archivableShare.label" = "可归档占比 %@";
 "classification.archivableShare.tiny" = "可归档占比极小：这个工具的占用几乎都不在可归档范围内，归档它不会释放多少空间。";
+"classification.summary.title" = "主要占用项（按子路径）";
+"classification.summary.row" = "%1$@（%2$@，%3$@）";
+"classification.summary.undeclared" = "规则未声明，归入不确定";
+"classification.summary.protectedReason" = "内置受保护清单：%@";
+"classification.summary.pattern" = "规则声明：%@";
+"classification.summary.ancestor" = "由规则声明 %@ 覆盖";
+"classification.summary.more" = "另有 %@ 项";

@@ -83,3 +83,10 @@
 "classification.handling.uncertain" = "Locked, size shown only";
 "classification.archivableShare.label" = "Archivable share %@";
 "classification.archivableShare.tiny" = "Very little of this is archivable: almost none of this tool's usage is in the archivable category, so archiving it would free little space.";
+"classification.summary.title" = "Main usage by subpath";
+"classification.summary.row" = "%1$@ (%2$@, %3$@)";
+"classification.summary.undeclared" = "Not declared by any rule, counted as Uncertain";
+"classification.summary.protectedReason" = "Built-in protected list: %@";
+"classification.summary.pattern" = "Declared by rule %@";
+"classification.summary.ancestor" = "Covered by rule declaration %@";
+"classification.summary.more" = "%@ more";

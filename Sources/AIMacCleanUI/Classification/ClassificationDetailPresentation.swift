@@ -80,7 +80,8 @@ public enum ClassificationDetailPresenter {
         totalBytes: Int64,
         language: AppLanguage?
     ) -> ClassificationCategoryRow {
-        ClassificationCategoryRow(
+        let summaries = summaryRows(for: occupancy, language: language)
+        return ClassificationCategoryRow(
             category: occupancy.category,
             nameText: nameText(for: occupancy.category, language: language),
             handlingText: handlingText(for: occupancy.category, language: language),
@@ -90,8 +91,60 @@ public enum ClassificationDetailPresenter {
             isArchivableNow: occupancy.category.isArchivableNow,
             sizeText: occupancy.occupancy.sizeText,
             fileCountText: fileCountText(occupancy.occupancy.fileCount, language: language),
-            shareText: percentText(share(of: occupancy.occupancy.bytes, totalBytes: totalBytes))
+            shareText: percentText(share(of: occupancy.occupancy.bytes, totalBytes: totalBytes)),
+            summaries: summaries.rows,
+            hiddenSummaryCount: summaries.hidden
         )
+    }
+
+    // MARK: - 子路径明细
+
+    /// 一个类别按子路径的明细：字节数从大到小，只列前 `maxSummariesPerCategory` 条。
+    ///
+    /// 这里再排一次序（领域层已经保证降序），因为**界面的顺序是界面自己的承诺**：
+    /// 「受保护的大头排在最上面」不依赖上游有没有按约定给。
+    ///
+    /// 被截掉的那些只报数量（`另有 2 项`），不静默丢弃——用户要知道这里不是全部。
+    private static func summaryRows(
+        for occupancy: CategoryOccupancy,
+        language: AppLanguage?
+    ) -> (rows: [ClassificationSummaryRow], hidden: Int) {
+        let sorted = occupancy.summaries.sorted { lhs, rhs in
+            if lhs.occupancy.bytes != rhs.occupancy.bytes { return lhs.occupancy.bytes > rhs.occupancy.bytes }
+            return lhs.subpath < rhs.subpath
+        }
+        let rows = sorted.prefix(maxSummariesPerCategory).map { summary -> ClassificationSummaryRow in
+            let fileCount = fileCountText(summary.occupancy.fileCount, language: language)
+            return ClassificationSummaryRow(
+                subpath: summary.subpath,
+                sizeText: summary.occupancy.sizeText,
+                fileCountText: fileCount,
+                attributionText: attributionText(for: summary, language: language),
+                text: L10n.format(
+                    .classificationSummaryRow,
+                    [summary.subpath, summary.occupancy.sizeText, fileCount],
+                    language: language
+                )
+            )
+        }
+        return (rows, max(0, sorted.count - rows.count))
+    }
+
+    /// 一条子路径「为什么是这一类」：内置受保护清单 / 规则声明 / 由规则覆盖 / 规则未声明。
+    ///
+    /// 内置清单与规则声明必须分开说：规则可以被用户改，内置清单不能（PRD §8.1）。
+    public static func attributionText(for summary: CategorySummary, language: AppLanguage? = nil) -> String? {
+        if let reason = summary.protectionReason {
+            return L10n.format(.classificationSummaryProtectedReason, [reason], language: language)
+        }
+        switch summary.provenance {
+        case .undeclared:
+            return L10n.text(.classificationSummaryUndeclared, language: language)
+        case let .declaredPath(path):
+            return L10n.format(.classificationSummaryPattern, [summary.pattern ?? path], language: language)
+        case let .declaredAncestor(path):
+            return L10n.format(.classificationSummaryAncestor, [summary.pattern ?? path], language: language)
+        }
     }
 
     // MARK: - 文案与数字
@@ -241,6 +294,12 @@ public struct ClassificationCategoryRow: Equatable, Identifiable {
     /// 本类占本工具总占用的比例（`97.47%`）。
     public let shareText: String
 
+    /// 本类按子路径的明细，字节数从大到小（最多 `ClassificationDetailPresenter.maxSummariesPerCategory` 条）。
+    public let summaries: [ClassificationSummaryRow]
+
+    /// 被截掉的明细条数：界面上写成「另有 N 项」，不静默丢掉。
+    public let hiddenSummaryCount: Int
+
     public var id: String { category.rawValue }
 
     public init(
@@ -251,7 +310,9 @@ public struct ClassificationCategoryRow: Equatable, Identifiable {
         isArchivableNow: Bool,
         sizeText: String,
         fileCountText: String,
-        shareText: String
+        shareText: String,
+        summaries: [ClassificationSummaryRow] = [],
+        hiddenSummaryCount: Int = 0
     ) {
         self.category = category
         self.nameText = nameText
@@ -261,5 +322,44 @@ public struct ClassificationCategoryRow: Equatable, Identifiable {
         self.sizeText = sizeText
         self.fileCountText = fileCountText
         self.shareText = shareText
+        self.summaries = summaries
+        self.hiddenSummaryCount = hiddenSummaryCount
+    }
+}
+
+/// 一条子路径明细：类别内「谁占了大头」。
+///
+/// 受保护的 `plugins/` 247M、`skills/` 23M 这类大头就出现在这里（PRD §14.1）。
+public struct ClassificationSummaryRow: Equatable, Identifiable {
+
+    /// 相对所属根的子路径（`plugins`、`shell-snapshots`）。
+    public let subpath: String
+
+    /// 该子路径的占用。
+    public let sizeText: String
+
+    /// 该子路径的文件数。
+    public let fileCountText: String
+
+    /// 「为什么是这一类」：内置受保护清单 / 规则声明 / 由规则覆盖 / 规则未声明。
+    public let attributionText: String?
+
+    /// 渲染用的整行文字：`plugins（247 MB，1200 个文件）`。
+    public let text: String
+
+    public var id: String { subpath }
+
+    public init(
+        subpath: String,
+        sizeText: String,
+        fileCountText: String,
+        attributionText: String?,
+        text: String
+    ) {
+        self.subpath = subpath
+        self.sizeText = sizeText
+        self.fileCountText = fileCountText
+        self.attributionText = attributionText
+        self.text = text
     }
 }
