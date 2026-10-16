@@ -1,5 +1,6 @@
 import Foundation
 
+import AIMacCleanCore
 import AIMacCleanRules
 
 /// 一次深扫的接线结果（issue #27）。
@@ -46,22 +47,41 @@ public protocol DeepScanSource {
     func run() -> DeepScanRun
 }
 
-/// 生产环境的深扫接线（issue #27）。
+/// 「把已确认的工具深扫成一份占用报告」这件事的入口（issue #28）。
 ///
-/// 一次 `run()` 依次做三件事，顺序本身就是纪律：
-/// 1. **加载内置规则** → 规则集准入（保护单调性在这一步生效）。
-/// 2. **从确认存储装配一台台工具**（`ConfirmedTool`）：只认**已确认**的记录，
-///    并按工具标识去重（见 `ConfirmedTool.normalized`）。
-/// 3. **深扫**：`DeepScanner` 只读元数据与文件头，零写入。
+/// 概览页只需要这一个动作：给它确认存储里的记录，拿回 `DeepScanReport`。
+/// 规则加载、规则集准入、`~/…` 展开、展示名解析这些事都在实现里，
+/// 视图模型因此不必认识规则层（UI 只依赖 Domain）。
 ///
-/// 没有可用规则时**不扫**：不给出一排 0 B 的假占用，而是给出 `DeepScanIssue`
-/// 让界面把原因说出来（PRD §5.1 的四类判定来自规则声明，没有规则就没有四类）。
-public struct DeepScanService: DeepScanSource {
+/// 收成协议是为了可注入：概览页的测试给一份固定报告，不跑磁盘扫描
+/// （扫描本身已由 `DeepScanningTests` / `DeepScanBundledRuleTests` 在各自的 seam 上钉住）。
+public protocol ConfirmedToolScanning {
+
+    /// 对这批**已确认**的工具做深扫。
+    ///
+    /// - Parameter records: 确认存储里的记录（`ConfirmationStore.confirmedTools`）。
+    ///   未确认的候选不在其中，因此不可能出现在占用里（PRD §4.1 第 4 步）。
+    func scan(_ records: [ConfirmationRecord]) -> DeepScanReport
+}
+
+/// 生产环境的深扫接线：**分类明细页（#27）与概览页（#28）共用这一个类型**。
+///
+/// 两个入口不是两条路：
+/// - `run() -> DeepScanRun` 给分类明细页：带上「规则不可用」这种**问题**，
+///   让界面把原因说出来，而不是显示一排 0 B 的假占用。
+/// - `scan(_:) -> DeepScanReport` 给概览页：只要一份报告；规则缺失时照常给结果
+///   （没有规则可依的已确认工具落进「不确定」，而不是整页报错）。
+///
+/// 两者都收敛到同一段核心（`scan(tools:rules:)`）：**规则加载、规则集准入、
+/// 「确认记录 → 深扫输入」的映射只有一份**。于是「同一个工具标识只扫一次」（#31：
+/// 否则规则声明的仅展示根——Cursor 的 14G AppSupport——会被算两遍）这条纪律
+/// 在两条入口上完全一致，不可能分歧。
+public struct DeepScanService: DeepScanSource, ConfirmedToolScanning {
 
     /// 运行一次深扫需要的外部输入。
     public struct Configuration: Equatable, Sendable {
 
-        /// 主目录绝对路径（`~` 的展开基准）。
+        /// 主目录绝对路径（`~` 的展开基准与路径缩写基准）。
         public var homeDirectory: String
 
         /// 内置规则目录。`nil` 表示资源没找到。
@@ -81,6 +101,17 @@ public struct DeepScanService: DeepScanSource {
     /// 真正干活的深扫器。测试可注入记录器或替身。
     public let scanner: any DeepScanning
 
+    /// 构造时注入的规则集（`nil` 表示规则要现从 `configuration.ruleDirectory` 加载）。
+    ///
+    /// 只有概览页入口（`init(rules:homeDirectory:scanner:)`）会填它——见下面的
+    /// `InMemoryConfirmationStore`。分类明细页入口走目录加载，与出厂接线同一条路。
+    private let injectedRules: RuleAdmissionReport?
+
+    // MARK: - 装配
+
+    /// 分类明细页的入口（issue #27）：配置 + 确认存储 + 深扫器。
+    ///
+    /// 规则在每次 `run()` 时从 `configuration.ruleDirectory` 重新加载并准入。
     public init(
         configuration: Configuration,
         store: any ConfirmationStore,
@@ -89,22 +120,48 @@ public struct DeepScanService: DeepScanSource {
         self.configuration = configuration
         self.store = store
         self.scanner = scanner
+        self.injectedRules = nil
     }
 
-    /// 应用启动时用的入口：真实规则目录与本机确认存储。
+    /// 概览页的入口（issue #28）：**已准入**的规则 + 主目录 + 深扫器。
+    ///
+    /// 规则已经过 `RuleSetAdmission`（保护单调性在这一步生效），因此这条入口不再读规则目录；
+    /// `homeDirectory` 显式传入，本层不读 `NSHomeDirectory()`。
+    public init(
+        rules: RuleAdmissionReport,
+        homeDirectory: String,
+        scanner: any DeepScanning = DeepScanner()
+    ) {
+        self.configuration = Configuration(homeDirectory: homeDirectory, ruleDirectory: nil)
+        self.store = InMemoryConfirmationStore(rules: rules)
+        self.scanner = scanner
+        self.injectedRules = rules
+    }
+
+    /// 应用启动时用的统一入口：真实规则目录 + 本机确认存储（两个页面共用）。
+    ///
+    /// `fileSystem` 透给 `DeepScanner`：测试注入记录型文件系统后，
+    /// 可以断言概览读的这条路同样零写入。
     public static func standard(
         store: any ConfirmationStore = JSONConfirmationStore.standard(),
         homeDirectory: String = NSHomeDirectory(),
         ruleDirectory: URL? = BuiltInRuleResources.directory,
-        scanner: any DeepScanning = DeepScanner()
+        fileSystem: any DiscoveryFileSystem = RealDiscoveryFileSystem(),
+        scanner: (any DeepScanning)? = nil
     ) -> DeepScanService {
         DeepScanService(
             configuration: Configuration(homeDirectory: homeDirectory, ruleDirectory: ruleDirectory),
             store: store,
-            scanner: scanner
+            scanner: scanner ?? DeepScanner(fileSystem: fileSystem)
         )
     }
 
+    // MARK: - 入口一：分类明细页（#27）
+
+    /// 跑一次深扫，并把「做不成的那部分」如实带回来。
+    ///
+    /// 没有可用规则时**不扫**：不给出一排 0 B 的假占用，而是给出 `DeepScanIssue`
+    /// 让界面把原因说出来（PRD §5.1 的四类判定来自规则声明，没有规则就没有四类）。
     public func run() -> DeepScanRun {
         let (rules, issues) = loadUsableRules()
         guard issues.isEmpty else {
@@ -113,48 +170,157 @@ public struct DeepScanService: DeepScanSource {
             return DeepScanRun(issues: issues)
         }
 
-        let tools = ConfirmedTool.normalized(confirmedTools(rules: rules))
-        return DeepScanRun(
-            report: scanner.scan(
-                tools: tools,
-                rules: rules,
-                homeDirectory: configuration.homeDirectory
-            ),
-            issues: []
+        return DeepScanRun(report: scan(tools: confirmedTools(from: store.confirmedTools), rules: rules), issues: [])
+    }
+
+    // MARK: - 入口二：概览页（#28）
+
+    /// 对这批**已确认**的记录做深扫（概览页只取报告，规则不可用时也照常给结果）。
+    public func scan(_ records: [ConfirmationRecord]) -> DeepScanReport {
+        scan(tools: confirmedTools(from: records), rules: admittedRules)
+    }
+
+    /// 本实例的已准入规则集。
+    ///
+    /// - 概览页入口：构造时注入的规则集原样返回。
+    /// - 分类明细页入口：从 `configuration.ruleDirectory` 加载并准入
+    ///   （与 `DiscoveryService` 的加载顺序一致）；目录缺失或一条都没载入时给空规则集。
+    public var admittedRules: RuleAdmissionReport {
+        if let injectedRules { return injectedRules }
+        return DeepScanService.admittedRules(
+            inDirectory: configuration.ruleDirectory,
+            homeDirectory: configuration.homeDirectory
         )
+    }
+
+    /// 加载并准入规则；目录缺失时给空规则集（与 `DiscoveryService` 的加载顺序一致）。
+    public static func admittedRules(
+        inDirectory ruleDirectory: URL?,
+        homeDirectory: String
+    ) -> RuleAdmissionReport {
+        guard let ruleDirectory else {
+            return RuleAdmissionReport(usableRules: [], rejections: [])
+        }
+        let load = RuleLoader.loadRules(inDirectory: ruleDirectory)
+        return RuleSetAdmission.admit(rules: load.rules, homeDirectory: homeDirectory)
+    }
+
+    /// 确认记录 → 深扫输入：按工具标识去重，展示名取规则里的名字。
+    ///
+    /// 未知工具（记录里没有工具标识）**不参与去重**：它们没有规则可依据，
+    /// 每一条记录都是一个独立的目录，用路径当标识与展示名（GLOSSARY「不确定」）。
+    ///
+    /// `run()` 与 `scan(_:)` 都从这里取工具，因此两条入口对「哪条记录代表这台工具」
+    /// 的判断完全一致。
+    public func confirmedTools(from records: [ConfirmationRecord]) -> [ConfirmedTool] {
+        let rules = admittedRules
+        let identified = records
+            .filter { $0.toolIdentifier != nil }
+            .reduce(into: [String: ConfirmationRecord]()) { chosen, record in
+                guard let id = record.toolIdentifier else { return }
+                guard let current = chosen[id] else {
+                    chosen[id] = record
+                    return
+                }
+                if isPreferred(record, over: current, toolID: id, rules: rules) {
+                    chosen[id] = record
+                }
+            }
+            .values
+            .sorted { ($0.toolIdentifier ?? "") < ($1.toolIdentifier ?? "") }
+
+        let unknown = records
+            .filter { $0.toolIdentifier == nil }
+            .sorted { $0.toolRootPath < $1.toolRootPath }
+
+        let tools = (identified + unknown).map { record in
+            let id = record.toolIdentifier ?? record.toolRootPath
+            return ConfirmedTool(
+                id: id,
+                displayName: displayName(forToolID: id, toolRootPath: record.toolRootPath, rules: rules),
+                toolRootPath: record.toolRootPath
+            )
+        }
+
+        // 兜底去重：上一步按工具标识收敛了**有规则可依**的记录，这里再按 `ConfirmedTool`
+        // 的排序规则收一次——未知工具用路径当标识，与某条有标识的记录撞上同一条路径时
+        // （同一个目录先被当作不确定、后来又被确认），不能被扫两遍。
+        return ConfirmedTool.normalized(tools)
     }
 
     // MARK: - 内部
 
-    /// 加载规则并走规则集准入。目录缺失或一条都没载入都给问题，不静默。
-    private func loadUsableRules() -> (rules: RuleAdmissionReport, issues: [DeepScanIssue]) {
-        guard let directory = configuration.ruleDirectory else {
-            return (RuleAdmissionReport(usableRules: [], rejections: []), [.noRulesLoaded])
-        }
-        let report = RuleLoader.loadRules(inDirectory: directory)
-        guard !report.rules.isEmpty else {
-            return (RuleAdmissionReport(usableRules: [], rejections: []), [.noRulesLoaded])
-        }
-        let admission = RuleSetAdmission.admit(rules: report.rules, homeDirectory: configuration.homeDirectory)
-        guard !admission.usableRules.isEmpty else {
-            return (admission, [.noUsableRules(rejectedCount: admission.rejections.count)])
-        }
-        return (admission, [])
+    /// **两个入口共用的核心**：给定已准入的规则与已确认的工具，扫出报告。
+    ///
+    /// `run()` 与 `scan(_:)` 都收敛到这里，所以「同一台工具只扫一次」「结果与输入顺序无关」
+    /// 这些纪律只有一处实现，两条入口给不出互相矛盾的报告。
+    private func scan(
+        tools: [ConfirmedTool],
+        rules: RuleAdmissionReport
+    ) -> DeepScanReport {
+        scanner.scan(
+            tools: tools,
+            rules: rules,
+            homeDirectory: configuration.homeDirectory
+        )
     }
 
-    /// 把已确认的记录装配成深扫的输入。
+    /// 加载规则并走规则集准入。目录缺失或一条都没载入都给问题，不静默。
     ///
-    /// 展示名取规则的 `displayName`（它是用户认得的名字：`Claude Code`），
-    /// 没有对应规则时退回记录里的标识——不编造名字。
-    private func confirmedTools(rules: RuleAdmissionReport) -> [ConfirmedTool] {
-        store.confirmedTools.compactMap { record in
-            guard let identifier = record.toolIdentifier else { return nil }
-            return ConfirmedTool(
-                id: identifier,
-                displayName: rules.usableRule(id: identifier)?.displayName ?? identifier,
-                toolRootPath: record.toolRootPath
-            )
+    /// 注入式装配（概览页入口，`ruleDirectory == nil`）直接用注入的规则集：
+    /// 它在构造时就已过准入，这里不重复加载。
+    private func loadUsableRules() -> (rules: RuleAdmissionReport, issues: [DeepScanIssue]) {
+        let admitted = admittedRules
+        guard !admitted.usableRules.isEmpty else {
+            // 一条可用规则都没有：可能是一条规则都没读到，也可能是读到了但全部未过准入。
+            // 两者的区别对用户有意义（前者多半是打包漏了资源，后者是规则本身有问题），
+            // 因此按「有没有加载到规则」分开说话。
+            if configuration.ruleDirectory != nil, let directory = configuration.ruleDirectory {
+                let loaded = RuleLoader.loadRules(inDirectory: directory)
+                if loaded.rules.isEmpty {
+                    return (admitted, [.noRulesLoaded])
+                }
+                return (admitted, [.noUsableRules(rejectedCount: admitted.rejections.count)])
+            }
+            return (admitted, [.noRulesLoaded])
         }
+        return (admitted, [])
+    }
+
+    /// 规则里的展示名；没有规则可依据时退化成路径（`~/.mystery`），不编造名字。
+    private func displayName(forToolID id: String, toolRootPath: String, rules: RuleAdmissionReport) -> String {
+        rules.usableRule(id: id)?.displayName
+            ?? ToolRootDisplay.abbreviated(toolRootPath, homeDirectory: configuration.homeDirectory)
+    }
+
+    /// 两条同 id 记录里哪一条该留下：规则声明的工具根优先，其次路径字典序小者。
+    private func isPreferred(
+        _ candidate: ConfirmationRecord,
+        over current: ConfirmationRecord,
+        toolID: String,
+        rules: RuleAdmissionReport
+    ) -> Bool {
+        let declared = declaredToolRootPaths(forToolID: toolID, rules: rules)
+        let candidateIsDeclared = declared.contains(normalized(candidate.toolRootPath))
+        let currentIsDeclared = declared.contains(normalized(current.toolRootPath))
+        if candidateIsDeclared != currentIsDeclared { return candidateIsDeclared }
+        return normalized(candidate.toolRootPath) < normalized(current.toolRootPath)
+    }
+
+    /// 规则为该工具声明的主工具根（展开 `~` 后归一），用于去重时的优先级判定。
+    private func declaredToolRootPaths(forToolID id: String, rules: RuleAdmissionReport) -> Set<String> {
+        let roots = rules.usableRule(id: id)?.roots ?? []
+        return Set(
+            roots
+                .filter { $0.role == .toolRoot }
+                .map { normalized($0.absolutePath(homeDirectory: configuration.homeDirectory)) }
+        )
+    }
+
+    /// 只做路径归一（去重复与尾随分隔符、消掉 `.` / `..`），**不解析符号链接**：
+    /// 这里比的是记录与规则声明的字面路径，解析链接反而会把不同位置当成同一个。
+    private func normalized(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
     }
 }
 
@@ -166,13 +332,56 @@ extension ConfirmedTool {
     /// 不去重就会把这台工具扫两遍——规则声明的**仅展示根**（issue #31：Cursor 的
     /// `~/Library/Application Support/Cursor` 14G）因此被算两遍，占用直接翻倍。
     ///
-    /// 多条记录撞同一个标识时保留**工具根路径字典序最小**的那条：规则为每个工具只声明
-    /// 一个工具根，多出来的记录是同一台工具的重复确认；取字典序最小的那条是为了让结果
-    /// 不随确认存储的遍历顺序变（同样的输入永远给同样的结果）。
+    /// 多条记录撞同一个标识时保留**工具根路径字典序最小**的那条。
+    ///
+    /// 这是**不知道规则时**的兜底次序：`DeepScanService.confirmedTools(from:)` 在有规则可依时
+    /// 会先把「规则声明的工具根」挑出来（见 `isPreferred`），再落到这里收敛。
+    /// 两级次序的目标是同一个：同样的输入永远给同样的结果，且同一台工具只算一次。
     public static func normalized(_ tools: [ConfirmedTool]) -> [ConfirmedTool] {
         var seen = Set<String>()
         return tools
             .sorted { ($0.id, $0.toolRootPath) < ($1.id, $1.toolRootPath) }
             .filter { seen.insert($0.id).inserted }
     }
+}
+
+/// 注入式装配的确认存储：只携带一份**已准入**的规则集，不落任何盘（零写入）。
+///
+/// 概览页入口用它把规则集带进同一个 `DeepScanService`：确认记录始终由调用方逐条传给
+/// `scan(_:)`，因此这个存储的 `confirmedTools` 恒为空——它存在的唯一目的，是让两种装配
+/// 方式共用同一套字段（`store` / `scanner` / `configuration`），而不是让同一个类型长出
+/// 两套内部状态。**它不是可替换存储的测试替身**（spec #7 明确不为持久化单开 seam）：
+/// 它没有任何决定/遗忘/落盘的实现，只是携带规则。
+private final class InMemoryConfirmationStore: ConfirmationStore {
+
+    /// 构造时注入的规则集（已过 `RuleSetAdmission`）。
+    let rules: RuleAdmissionReport
+
+    init(rules: RuleAdmissionReport) {
+        self.rules = rules
+    }
+
+    var confirmedTools: [ConfirmationRecord] { [] }
+
+    var ignoredCandidates: [ConfirmationRecord] { [] }
+
+    func record(forToolRootPath: String) -> ConfirmationRecord? { nil }
+
+    @discardableResult
+    func decide(
+        toolIdentifier: String?,
+        toolRootPath: String,
+        decision: ToolDecision,
+        signals: ConfirmationSignals,
+        decidedAt: Date
+    ) throws -> ConfirmationRecord {
+        throw ConfirmationStoreError.storeUnreadable(
+            reason: "这是只携带规则集的注入式装配，不承载确认记录"
+        )
+    }
+
+    @discardableResult
+    func forgetTool(atToolRootPath: String) throws -> Bool { false }
+
+    func pendingToolRootPaths(amongCandidates candidates: [String]) -> [String] { candidates }
 }

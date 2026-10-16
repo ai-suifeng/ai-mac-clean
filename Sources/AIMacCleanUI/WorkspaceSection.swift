@@ -41,8 +41,13 @@ public enum WorkspaceSection: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// 本阶段是不是真实页面。
+    ///
+    /// 发现与确认页是 issue #16，概览页是 issue #28；其余三个分栏仍是占位。
     public var isImplemented: Bool {
-        self == .discovery
+        switch self {
+        case .overview, .discovery: return true
+        case .archive, .archived, .settings: return false
+        }
     }
 
     private var titleKey: L10n.Key {
@@ -70,7 +75,11 @@ public enum WorkspaceSection: String, CaseIterable, Identifiable, Sendable {
         case .discovery:
             // 发现与确认页已经是真实页面，占位文案不会被展示到。
             return .discoveryStageNote
-        case .overview: return .placeholderOverview
+        case .overview:
+            // 概览页（issue #28）已经是真实页面：这里给当前阶段的实话，
+            // 而不是「深扫落地后会展示可归档预计释放空间」那种对 M2 的预告
+            // （§9 的压缩节省 / 搬迁腾出分列属 M3）。
+            return .overviewStageNote
         case .archive: return .placeholderArchive
         case .archived: return .placeholderArchived
         case .settings: return .placeholderSettings
@@ -82,8 +91,10 @@ public enum WorkspaceSection: String, CaseIterable, Identifiable, Sendable {
 public struct WorkspaceShellModel: Equatable, Sendable {
     /// 启动时选中的分栏。
     ///
-    /// 落在「发现与确认」：本阶段只有这一页是真的（issue #16），
-    /// 让用户一开应用就看到一个承诺了还没做的概览页没有意义。
+    /// 仍然落在「发现与确认」。概览页（issue #28）现在也是真实页面，但**先确认工具**
+    /// 才有占用可看，默认停在那份数据的来源页；概览页的空状态会把用户指过来。
+    /// 文档没有规定默认落地页（PRD §9 只定了分栏集合），因此这里取最小改动，
+    /// 不顺手改产品的第一屏。
     public static let defaultSelection: WorkspaceSection = .discovery
 
     /// 当前选中的分栏。

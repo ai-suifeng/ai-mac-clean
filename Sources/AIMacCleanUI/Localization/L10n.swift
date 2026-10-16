@@ -49,10 +49,34 @@ public enum L10n {
         case sidebarAccessibilityArchived = "sidebar.accessibility.archived"
         case sidebarAccessibilitySettings = "sidebar.accessibility.settings"
 
-        case placeholderOverview = "placeholder.overview"
+        // 概览占位文案随 issue #28 下线：这一页已经是真实页面，
+        // 它取的说明改走 `overview.stage.note`（当前阶段的实话）。
         case placeholderArchive = "placeholder.archive"
         case placeholderArchived = "placeholder.archived"
         case placeholderSettings = "placeholder.settings"
+
+        // 概览页（issue #28）
+        case overviewPageTitle = "overview.page.title"
+        case overviewStageNote = "overview.stage.note"
+        case overviewScanning = "overview.status.scanning"
+        case overviewReload = "overview.action.reload"
+        case overviewEmptyNoTools = "overview.empty.noTools"
+        case overviewTotalValue = "overview.total.value"
+        case overviewArchivableValue = "overview.archivable.value"
+        case overviewSectionCategories = "overview.section.categories"
+        case overviewSectionTools = "overview.section.tools"
+        case overviewOccupancyValue = "overview.occupancy.value"
+        case overviewToolArchivable = "overview.tool.archivable"
+        case overviewToolNegligible = "overview.tool.negligible"
+        case overviewToolDisplayOnly = "overview.tool.displayOnly"
+        case overviewDiskFree = "overview.disk.free"
+        case overviewDiskUnknownUnreadable = "overview.disk.unknown.unreadable"
+        case overviewDiskUnknownNotReported = "overview.disk.unknown.notReported"
+        case overviewArchiveAction = "overview.action.archive"
+        case overviewArchiveDisabledReason = "overview.archive.disabledReason"
+        case overviewAccessibilityTotal = "overview.accessibility.total"
+        case overviewAccessibilityCategory = "overview.accessibility.category"
+        case overviewAccessibilityTool = "overview.accessibility.tool"
 
         // 发现与确认页
         case discoveryPageTitle = "discovery.page.title"
