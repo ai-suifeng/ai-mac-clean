@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 构建 + 受护栏保护的测试（issue #14）
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 工具链版本
+        run: swift --version
+
+      # 本机也可能有 AI 工具数据目录，CI 同样跑在受护栏保护的入口下：
+      # Scripts/run-tests.sh 会先自检护栏真的会拦，再跑测试并校验护栏确实生效。
+      - name: 测试（issue #14 路径护栏生效）
+        run: ./Scripts/run-tests.sh
+
+      - name: 护栏验收证据（故意违规必须被拦）
+        if: always()
+        run: ./Scripts/run-tests.sh --demo-violation

@@ -1,0 +1,74 @@
+/* 本阶段界面文案先以中文落地（PRD §9：中文/英文）。
+   结构上英文与中文一一对应，加第三种语言只需再加一个 .lproj。
+
+   纪律：key 由 L10n.Key 登记，两份目录的 key 集合必须一致
+   （LocalizationCatalogTests 会核对）。文案改动直接改这里。 */
+
+/* MARK: - 应用与分栏 */
+"app.title" = "AI 记录瘦身";
+"sidebar.section.overview" = "概览";
+"sidebar.section.discovery" = "发现与确认";
+"sidebar.section.archive" = "归档";
+"sidebar.section.archived" = "已归档";
+"sidebar.section.settings" = "设置";
+
+"sidebar.accessibility.overview" = "概览：总占用与可归档预计释放空间";
+"sidebar.accessibility.discovery" = "发现与确认：候选列表与置信度标识";
+"sidebar.accessibility.archive" = "归档：范围选择、预览与结果汇总";
+"sidebar.accessibility.archived" = "已归档：浏览、搜索与还原";
+"sidebar.accessibility.settings" = "设置：归档位置与已确认工具管理";
+
+"placeholder.overview" = "概览会在深扫落地后展示总占用与可归档预计释放空间。当前阶段还没有任何归档能力。";
+"placeholder.archive" = "归档能力将在自校验归档包落地后可用。当前阶段不会移动或删除任何文件。";
+"placeholder.archived" = "已归档浏览与还原将在后续里程碑可用。";
+"placeholder.settings" = "归档位置与已确认工具管理将在后续里程碑可用。";
+
+/* MARK: - 发现与确认页 */
+"discovery.page.title" = "发现与确认";
+"discovery.status.scanning" = "正在扫描…（只读元数据与文件头，不动任何文件）";
+"discovery.action.reload" = "重新扫描";
+"discovery.group.high" = "高置信度：结构指纹 + 外部佐证";
+"discovery.group.medium" = "中置信度：仅结构指纹";
+"discovery.group.low" = "疑似候选：只有位置或名字像，没有任何结构证据";
+"discovery.group.expanded" = "已展开";
+"discovery.group.collapsed" = "已折叠";
+"discovery.confidence.high" = "高";
+"discovery.confidence.medium" = "中";
+"discovery.confidence.low" = "低";
+"discovery.badge.suspicious" = "疑似";
+"discovery.action.confirm" = "确认是 AI 工具";
+"discovery.action.ignore" = "忽略";
+"discovery.action.forget" = "移出列表";
+"discovery.action.restore" = "加回";
+"discovery.section.pending" = "待确认候选";
+"discovery.section.confirmed" = "已确认工具";
+"discovery.section.ignored" = "已忽略的候选";
+"discovery.empty.pending" = "没有待确认的候选。没有安装任何 AI 工具时这里就是空的。";
+"discovery.empty.confirmed" = "还没有确认过任何工具。";
+"discovery.empty.ignored" = "没有忽略过任何候选。";
+"discovery.stage.note" = "当前阶段只做浅扫：只列候选与置信度，不计算占用，也还没有任何归档能力。";
+
+/* MARK: - 信号与降权 */
+"discovery.signal.structural" = "结构指纹：%@";
+"discovery.signal.name" = "名称命中（只用于排序）：%@";
+"discovery.signal.application" = "安装位置（App 包）：%@";
+"discovery.signal.command" = "安装位置（命令）：%@";
+"discovery.signal.contentFeature" = "会话文件字段：%@";
+"discovery.demotion.negativeName" = "命中负向名单 %@，已降权并标为疑似";
+"discovery.demotion.missingFingerprint" = "没有命中任何结构特征";
+"discovery.protection.note" = "受保护";
+
+/* MARK: - 辅助功能 */
+"candidate.accessibility" = "%1$@，置信度 %2$@";
+"candidate.accessibility.confirmed" = "%1$@，已确认的 AI 工具";
+"candidate.accessibility.ignored" = "%1$@，已忽略的候选";
+
+/* MARK: - 权限与加载失败 */
+"discovery.permission.title" = "以下位置这次没能扫描（已跳过，其余位置照常扫描）";
+"discovery.permission.row" = "%1$@（%2$@）";
+"discovery.permission.footnote" = "只有确实遇到授权失败才会出现这个提示。应用不会预先索取完全磁盘访问权限。";
+"discovery.issue.noRules" = "没有加载到任何内置规则文件，候选列表为空。请确认打包时把规则资源一并放进了应用包——这一版还没有可用的工具规则。";
+"discovery.issue.rulesRejected" = "加载到 %@ 条规则，但全部未通过规则集准入（保护单调性校验），候选列表为空。";
+"discovery.issue.hintsUnavailable" = "关键词 / 负向名单词表这次没读到：%@。没有词表时仍可发现候选，但旧快照与伴生小工具不会被降权。";
+"discovery.issue.storeUnreadable" = "确认记录无法读取：%@。为避免覆盖你已有的判断，本次改动没有保存。";
+"discovery.issue.actionFailed" = "操作没有保存成功：%@";

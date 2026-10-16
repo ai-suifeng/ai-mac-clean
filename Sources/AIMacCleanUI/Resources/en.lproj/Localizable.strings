@@ -1,0 +1,71 @@
+/* English catalog. Key set mirrors zh-Hans.lproj exactly.
+   Format specifiers keep positional arguments (%1$@) so that word order can differ
+   from the Chinese version without touching the call site. */
+
+"app.title" = "AI Session Slimming";
+"sidebar.section.overview" = "Overview";
+"sidebar.section.discovery" = "Discover & Confirm";
+"sidebar.section.archive" = "Archive";
+"sidebar.section.archived" = "Archived";
+"sidebar.section.settings" = "Settings";
+
+"sidebar.accessibility.overview" = "Overview: total usage and estimated space that archiving would free";
+"sidebar.accessibility.discovery" = "Discover & Confirm: candidate list with confidence labels";
+"sidebar.accessibility.archive" = "Archive: scope selection, preview and results";
+"sidebar.accessibility.archived" = "Archived: browse, search and restore";
+"sidebar.accessibility.settings" = "Settings: archive location and confirmed tools";
+
+"placeholder.overview" = "Overview will show total usage and estimated reclaimable space once deep scanning lands. There is no archiving capability in this milestone.";
+"placeholder.archive" = "Archiving becomes available once self-verifying archives land. This milestone never moves or deletes a file.";
+"placeholder.archived" = "Browsing and restoring archives arrive in a later milestone.";
+"placeholder.settings" = "Archive location and confirmed-tool management arrive in a later milestone.";
+
+/* Discovery & Confirm */
+"discovery.page.title" = "Discover & Confirm";
+"discovery.status.scanning" = "Scanning… (reads metadata and file headers only; nothing is modified)";
+"discovery.action.reload" = "Scan Again";
+"discovery.group.high" = "High confidence: structural fingerprint + external evidence";
+"discovery.group.medium" = "Medium confidence: structural fingerprint only";
+"discovery.group.low" = "Suspected: only the location or the name looks right, no structural evidence";
+"discovery.group.expanded" = "expanded";
+"discovery.group.collapsed" = "collapsed";
+"discovery.confidence.high" = "High";
+"discovery.confidence.medium" = "Medium";
+"discovery.confidence.low" = "Low";
+"discovery.badge.suspicious" = "Suspected";
+"discovery.action.confirm" = "Confirm AI tool";
+"discovery.action.ignore" = "Ignore";
+"discovery.action.forget" = "Forget";
+"discovery.action.restore" = "Add back";
+"discovery.section.pending" = "Candidates to confirm";
+"discovery.section.confirmed" = "Confirmed tools";
+"discovery.section.ignored" = "Ignored candidates";
+"discovery.empty.pending" = "No candidates waiting for a decision. When no AI tool is installed this list is simply empty.";
+"discovery.empty.confirmed" = "You have not confirmed any tool yet.";
+"discovery.empty.ignored" = "You have not ignored any candidate.";
+"discovery.stage.note" = "This milestone only runs a shallow scan: candidates and confidence only, no size is computed and there is no archiving yet.";
+
+/* Signals and demotions */
+"discovery.signal.structural" = "Structural fingerprint: %@";
+"discovery.signal.name" = "Name match (sorting only): %@";
+"discovery.signal.application" = "Install location (app bundle): %@";
+"discovery.signal.command" = "Install location (command): %@";
+"discovery.signal.contentFeature" = "Session file fields: %@";
+"discovery.demotion.negativeName" = "Matches negative list %@, demoted and marked as suspected";
+"discovery.demotion.missingFingerprint" = "No structural feature matched";
+"discovery.protection.note" = "Protected";
+
+/* Accessibility */
+"candidate.accessibility" = "%1$@, confidence %2$@";
+"candidate.accessibility.confirmed" = "%1$@, confirmed AI tool";
+"candidate.accessibility.ignored" = "%1$@, ignored candidate";
+
+/* Permission and loading problems */
+"discovery.permission.title" = "These locations could not be scanned this time (they were skipped; everything else was scanned)";
+"discovery.permission.row" = "%1$@ (%2$@)";
+"discovery.permission.footnote" = "This notice only appears after an actual access failure. The app never asks for Full Disk Access up front.";
+"discovery.issue.noRules" = "No built-in rule files were loaded, so the candidate list is empty. Check that the packaged app embeds the rules resources — this build has no usable tool rules.";
+"discovery.issue.rulesRejected" = "%@ rule file(s) were loaded, but none of them passed rule-set admission (the protection-monotonicity check), so the candidate list is empty.";
+"discovery.issue.hintsUnavailable" = "The keyword / negative-name list could not be read: %@. Candidates are still discovered, but old snapshots and companion tools will not be demoted.";
+"discovery.issue.storeUnreadable" = "The confirmation records could not be read: %@. To avoid overwriting your existing decisions, nothing was saved this time.";
+"discovery.issue.actionFailed" = "The action was not saved: %@";

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "cursor",
+  "displayName": "Cursor",
+  "roots": [
+    { "path": "~/.cursor", "role": "toolRoot" },
+    { "path": "~/Library/Application Support/Cursor", "role": "displayOnly" }
+  ],
+  "installations": [
+    { "path": "/Applications/Cursor.app", "kind": "appBundle" },
+    { "path": "~/Applications/Cursor.app", "kind": "appBundle" }
+  ],
+  "structuralFingerprint": {
+    "sessionFilePatterns": [
+      "projects/<encodedPath>/agent-transcripts/<uuid>/<uuid>.jsonl",
+      "projects/<encodedPath>/agent-transcripts/<uuid>/subagents/*.jsonl"
+    ],
+    "sessionDirectoryShapes": [
+      "projects/<encodedPath>/agent-transcripts/<uuid>"
+    ],
+    "projectDirectoryShapes": [
+      "projects/<encodedPath>"
+    ]
+  },
+  "cascade": [
+    { "kind": "siblingTranscripts", "pattern": "subagents/*.jsonl" }
+  ],
+  "projectPathEncoding": {
+    "scheme": "singleDash",
+    "note": "PRD §5.3：与 Claude Code 同为单横线方案。本票只需规则格式能表达它，未做实测调优（spec #7 Out of Scope：Cursor 与 DeepSeek Harness 的规则落地属于里程碑 6）。"
+  },
+  "classification": [
+    { "pattern": "projects/<encodedPath>/agent-transcripts/<uuid>/<uuid>.jsonl", "category": "archivableSession", "note": "主转录。" },
+    { "pattern": "projects/<encodedPath>/agent-transcripts/<uuid>/subagents/*.jsonl", "category": "archivableSession", "note": "子代理转录。" },
+    { "pattern": "extensions/**", "category": "protected", "note": "扩展。" },
+    { "pattern": "plugins/**", "category": "protected", "note": "插件。" },
+    { "pattern": "worktrees/**", "category": "protected", "note": "工作树。" },
+    { "pattern": "skills*/**", "category": "protected", "note": "技能目录（含 `skills-x` 之类的变体）。" },
+    { "pattern": "mcp.json", "category": "protected", "note": "MCP 设置。" },
+    { "pattern": "hooks.json", "category": "protected", "note": "钩子设置。" },
+    { "pattern": "assets/**", "category": "uncertain", "note": "PRD §5.4：形态未实测，保守归入不确定，仅展示占用。" },
+    { "pattern": "canvases/**", "category": "uncertain", "note": "同上。" },
+    { "pattern": "mcps/**", "category": "uncertain", "note": "同上。" },
+    { "pattern": "terminals/**", "category": "uncertain", "note": "同上。" }
+  ],
+  "selfCompressed": false,
+  "sessionFileNaming": {
+    "stableSessionIdentifier": true,
+    "sessionIDSource": "fileName",
+    "note": "主会话标识在文件名里；同一会话的子代理转录通过同级级联归并。"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "deepseek-harness",
+  "displayName": "DeepSeek Harness",
+  "roots": [
+    { "path": "~/Library/Application Support/deepseek-harness-desktop/harness-home", "role": "toolRoot" },
+    { "path": "~/Library/Application Support/@deepseek-ai/dsh-desktop", "role": "displayOnly" }
+  ],
+  "installations": [
+    { "path": "/Applications/DeepSeek Harness.app", "kind": "appBundle" }
+  ],
+  "structuralFingerprint": {
+    "sessionFilePatterns": [
+      "sessions/<encodedPath>/session-<uuid>/session.jsonl.zstd"
+    ],
+    "sessionDirectoryShapes": [
+      "sessions/<encodedPath>/session-<uuid>"
+    ],
+    "projectDirectoryShapes": [
+      "sessions/<encodedPath>"
+    ]
+  },
+  "cascade": [],
+  "projectPathEncoding": {
+    "scheme": "doubleDash",
+    "note": "PRD §5.3：每个分隔符 → 双 `--`。本票只需规则格式能表达它，未做实测调优（spec #7 Out of Scope）。"
+  },
+  "classification": [
+    { "pattern": "sessions/<encodedPath>/session-<uuid>/session.jsonl.zstd", "category": "archivableSession", "note": "一个会话一个文件，文件名固定。会话数据不是 Electron 存储，就在这个文件树里（PRD §5.4）。" },
+    { "pattern": "settings.yaml", "category": "protected", "note": "配置。" },
+    { "pattern": ".credentials.yaml", "category": "protected", "note": "登录凭证，永不触碰。" },
+    { "pattern": "storages/**", "category": "protected", "note": "应用存储。" },
+    { "pattern": "profiles/**", "category": "protected", "note": "配置档案。" }
+  ],
+  "selfCompressed": true,
+  "sessionFileNaming": {
+    "stableSessionIdentifier": true,
+    "sessionIDSource": "parentDirectoryName",
+    "note": "会话 ID 在父目录名 `session-<uuid>` 里，文件名固定为 `session.jsonl.zstd`。"
+  }
+}
