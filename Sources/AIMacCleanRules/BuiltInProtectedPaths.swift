@@ -250,66 +250,21 @@ public enum BuiltInProtectedPaths {
     ///
     /// 判定**不做任何缓存**：宁可每次重算，也不因缓存过期漏掉一个刚出现的符号链接——
     /// 漏判的后果是动了凭证，而多算一次的开销只是多几次目录列举。
+    ///
+    /// 语义的**唯一实现**在 `ProtectedPathContext`（issue #29）：本方法就是
+    /// 「建一个只活这一次调用的快照 + 按原语义解析这条路径」。深扫这类逐文件判定的调用方
+    /// 改用一次扫描一份的快照（`ProtectedPathContext`），本入口保持不变，逐次调用者行为不变。
     public static func protection(
         forPath path: String,
         underToolRoot toolRoot: String,
         homeDirectory: String,
         listing: any ProtectedPathDirectoryListing = RealProtectedPathDirectoryListing()
     ) -> ProtectedMatch? {
-        let normalizedPath = ProtectedPathMath.normalize(path)
-        let normalizedRoot = ProtectedPathMath.normalize(toolRoot)
-        let normalizedHome = ProtectedPathMath.normalize(homeDirectory)
-        let scope = scope(ofToolRoot: normalizedRoot)
-
-        let realPath = ProtectedPathMath.resolvingSymlinks(normalizedPath)
-        let realRoot = ProtectedPathMath.resolvingSymlinks(normalizedRoot)
-        let realHome = ProtectedPathMath.resolvingSymlinks(normalizedHome)
-
-        // 1. 链接位置下的「工具根 + 相对路径」。
-        if let relative = nonEmptyRelativePath(of: normalizedPath, under: normalizedRoot),
-           let match = matchRules(scope: scope, relativePath: relative, source: .toolRootRelativePath) {
-            return match
-        }
-
-        // 2. 解析符号链接后的「工具根 + 相对路径」。
-        if let relative = nonEmptyRelativePath(of: realPath, under: realRoot),
-           let match = matchRules(scope: scope, relativePath: relative, source: .resolvedRelativePath) {
-            return match
-        }
-
-        // 3. 主目录下的跨工具条目（`~/.claude.json` 等位于工具根之外）。
-        if let relative = nonEmptyRelativePath(of: realPath, under: realHome),
-           let match = matchRules(scope: .homeDirectory, relativePath: relative, source: .homeRelativePath) {
-            return match
-        }
-
-        // 4. 纯凭证文件名：与工具无关，任何位置都保护。
-        if let match = matchFileNameRules(scope: .credentialFileName, normalizedPath: normalizedPath, realPath: realPath) {
-            return match
-        }
-
-        // 5. 未识别位置的文件名黑名单（PRD §5.5：未知工具默认仅展示）。
-        if scope == .unknownLocation,
-           let match = matchFileNameRules(scope: .unknownLocation, normalizedPath: normalizedPath, realPath: realPath) {
-            return match
-        }
-
-        // 6. 链接的真实目标落在某个内置受保护目录之下。
-        //
-        // 展开根用**调用方给的**主目录形态（`normalizedHome`），不用解析过符号链接的
-        // `realHome`：这一步的产物要拿去做真实目标比较（下面每个目录都会
-        // `resolvingSymlinks`），因此解析与否不影响判定；用调用方的形态能让「访问了哪些
-        // 路径」与调用方传进来的主目录保持一致，不至于凭空多出一个 `/private/var` 前缀。
-        if let rule = protectedDirectoryRule(containing: realPath, homeDirectory: normalizedHome, listing: listing) {
-            return ProtectedMatch(
-                ruleIdentifier: rule.identifier,
-                scope: rule.scope,
-                matchedRelativePath: realPath,
-                matchedVia: .symlinkRealTarget
-            )
-        }
-
-        return nil
+        ProtectedPathContext(
+            toolRoot: toolRoot,
+            homeDirectory: homeDirectory,
+            listing: listing
+        ).protection(forPath: path)
     }
 
     /// 命中条目所属的已知工具标识；主目录条目与文件名兜底不属于任何已知工具。
@@ -324,142 +279,5 @@ public enum BuiltInProtectedPaths {
             homeDirectory: homeDirectory
         )?.scope else { return nil }
         return identifier
-    }
-
-    // MARK: - 内部
-
-    /// 非空的相对路径；路径等于根时返回 `nil`（根目录本身不是一条受保护路径）。
-    private static func nonEmptyRelativePath(of path: String, under root: String) -> String? {
-        guard let relative = ProtectedPathMath.relativePath(of: path, under: root),
-              !relative.isEmpty
-        else { return nil }
-        return relative
-    }
-
-    /// 按文件名匹配条目：链接位置与真实目标的最后一段都试一遍。
-    private static func matchFileNameRules(
-        scope: BuiltInProtectedScope,
-        normalizedPath: String,
-        realPath: String
-    ) -> ProtectedMatch? {
-        var names = [ProtectedPathMath.components(of: realPath).last ?? normalizedPath]
-        if let linkName = ProtectedPathMath.components(of: normalizedPath).last, linkName != names[0] {
-            names.append(linkName)
-        }
-
-        for name in names {
-            if let match = matchRules(scope: scope, relativePath: name, source: .fileNameBlacklist) {
-                return match
-            }
-        }
-        return nil
-    }
-
-    /// 用某一作用域下的条目匹配相对路径。
-    private static func matchRules(
-        scope: BuiltInProtectedScope,
-        relativePath: String,
-        source: ProtectedMatchSource
-    ) -> ProtectedMatch? {
-        let components = ProtectedPathMath.components(of: relativePath)
-        guard !components.isEmpty else { return nil }
-
-        for rule in rules where rule.scope == scope {
-            let matched: Bool
-            switch rule.kind {
-            case .file:
-                // 文件条目按相对路径的最后一段比较（`*.sqlite` 因此覆盖任意层级）。
-                guard let name = components.last else { continue }
-                matched = ProtectedPathMath.matches(pattern: rule.pattern, component: name)
-            case .directory:
-                // 目录条目按相对路径的前缀比较，命中即覆盖整棵子树。
-                matched = leadingPrefix(of: components, matches: rule.pattern)
-            }
-
-            guard matched else { continue }
-            return ProtectedMatch(
-                ruleIdentifier: rule.identifier,
-                scope: rule.scope,
-                matchedRelativePath: relativePath,
-                matchedVia: source
-            )
-        }
-        return nil
-    }
-
-    /// 模式是否匹配 `components` 的某一段前缀（目录条目按前缀生效）。
-    private static func leadingPrefix(of components: [String], matches pattern: String) -> Bool {
-        for length in 1...components.count {
-            let prefix = components.prefix(length).joined(separator: "/")
-            if ProtectedPathMath.matches(pattern: pattern, path: prefix) {
-                return true
-            }
-        }
-        return false
-    }
-
-    /// 判断真实路径是否落在某个内置受保护目录之下。
-    ///
-    /// ## 只展开**规则声明的工具根**（issue #19）
-    ///
-    /// 目录条目按其通配符模式在工具根下展开实际目录，再逐个解析符号链接，
-    /// 因此 `~/.codex/skills` → `~/.agents/skills` 这种链接会让真实目标本身受保护
-    /// （PRD §14.5、验收 A3 / A8）。
-    ///
-    /// 主目录作用域的目录条目（`.agents/skills*`）**不参与展开**：它们由
-    /// `protection(...)` 第 3 步按「主目录 + 相对路径」的直接模式匹配判定，同样不需要
-    /// 列举。旧实现把 `homeDirectory` 也当成一个展开根，于是**每一次受保护判定**
-    /// 都会把用户主目录列一遍——那是本票要清掉的第二个通用位置扫描。
-    private static func protectedDirectoryRule(
-        containing realPath: String,
-        homeDirectory: String,
-        listing: any ProtectedPathDirectoryListing
-    ) -> BuiltInProtectedRule? {
-        // 展开根只有工具根：`rootRelativePaths` 是编译进二进制的已知工具位置清单。
-        var roots: [BuiltInProtectedScope: String] = [:]
-        for (identifier, relativeRoot) in rootRelativePaths {
-            roots[.toolRoot(identifier)] = ProtectedPathMath.normalize(homeDirectory + "/" + relativeRoot)
-        }
-
-        for rule in rules where rule.kind == .directory {
-            guard let root = roots[rule.scope] else { continue }
-            for directory in existingDirectories(matching: rule.pattern, in: root, listing: listing) {
-                let real = ProtectedPathMath.resolvingSymlinks(directory)
-                if realPath == real || realPath.hasPrefix(real + "/") {
-                    return rule
-                }
-            }
-        }
-        return nil
-    }
-
-    /// 列出 `root` 下匹配模式的实际目录（含通配符与多段前缀展开）。
-    ///
-    /// **展开绝不越过 `root`**：中途遇到符号链接就停下，既不解析它，也不去它指向的位置
-    /// 列举。`root` 一定是规则声明的工具根（见调用点），因此这条展开碰不到规则之外的
-    /// 任何位置；匹配到的符号链接本身仍作为结果返回，由调用方按真实目标判定
-    /// （`~/.codex/skills` → `~/.agents/skills` 的形态就靠这一步）。
-    private static func existingDirectories(
-        matching pattern: String,
-        in root: String,
-        listing: any ProtectedPathDirectoryListing
-    ) -> [String] {
-        var current = [root]
-
-        for component in ProtectedPathMath.components(of: pattern) {
-            var next: [String] = []
-            for directory in current {
-                // 不跟随符号链接：它指向哪里不关展开的事（User Story 12）。
-                guard !ProtectedPathMath.isSymbolicLink(directory),
-                      let entries = listing.entryNames(inDirectory: directory)
-                else { continue }
-                for entry in entries where ProtectedPathMath.matches(pattern: component, component: entry) {
-                    next.append(directory == "/" ? "/\(entry)" : directory + "/\(entry)")
-                }
-            }
-            current = next
-            if current.isEmpty { break }
-        }
-        return current
     }
 }
