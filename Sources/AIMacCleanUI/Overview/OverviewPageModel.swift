@@ -30,6 +30,9 @@ public final class OverviewPageModel: ObservableObject {
     /// 「扫描」与「更新状态」分别跑在哪条线程上（复用 issue #21 的调度点）。
     private let scheduler: DiscoveryScheduler
 
+    /// `state.report` 对应的那批已确认工具根（排序后）。用来判断「工具集合有没有变」。
+    private var reportToolRootPaths: [String] = []
+
     /// - Parameters:
     ///   - store: 确认存储。只读 `confirmedTools`——候选不参与概览。
     ///   - scanner: 深扫入口（生产用 `DeepScanService`，测试给固定报告）。
@@ -82,6 +85,15 @@ public final class OverviewPageModel: ObservableObject {
 
         // 只扫已确认的工具，且这一轮要扫的就是这一刻的记录。
         let records = store.confirmedTools
+        let toolRootPaths = Self.sortedToolRootPaths(records)
+
+        // 已确认工具变了时，`state.report` 里的数字对应的是**上一批**工具：
+        // 留着它会在扫描期间摆出一个属于别人的 0（「刚确认了工具，概览还是 0」）。
+        // 工具集合没变（普通的重新扫描）则原样保留，页面不会空一下（验收 6）。
+        if toolRootPaths != reportToolRootPaths {
+            state.report = nil
+        }
+
         state.isScanning = true
         state.confirmedToolCount = records.count
 
@@ -96,6 +108,7 @@ public final class OverviewPageModel: ObservableObject {
                 self.state.capacity = capacity
                 self.state.hasLoaded = true
                 self.state.isScanning = false
+                self.reportToolRootPaths = toolRootPaths
             }
         }
     }
@@ -261,7 +274,6 @@ public final class OverviewPageModel: ObservableObject {
             archivableText: L10n.format(.overviewToolArchivable, [archivableSize, share]),
             negligibleAnnotation: negligible,
             displayOnlyText: displayOnly,
-            categoryRows: report.categoryLines.map(categoryRow),
             accessibilityLabel: accessibilityLabel
         )
     }
@@ -276,4 +288,9 @@ public final class OverviewPageModel: ObservableObject {
 
     /// 文件数与 `ByteSizeFormatter` 同一套纪律：**不带千分位分隔符**，任何系统语言下写法一致。
     private static func countText(_ count: Int) -> String { "\(count)" }
+
+    /// 已确认工具根的去重排序清单：确认存储的顺序不作保证，比较工具集合时不能靠它。
+    private static func sortedToolRootPaths(_ records: [ConfirmationRecord]) -> [String] {
+        Set(records.map(\.toolRootPath)).sorted()
+    }
 }

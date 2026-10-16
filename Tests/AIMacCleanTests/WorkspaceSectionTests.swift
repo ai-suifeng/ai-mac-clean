@@ -28,19 +28,30 @@ final class WorkspaceSectionTests: XCTestCase {
         }
     }
 
-    func test默认停在唯一已经做出来的分栏() {
-        // issue #16：概览页要到里程碑 2 才有真实内容，一开就停在占位页没有意义。
-        // 断言的是「默认落在已实现的那一页」，而不是把某个 id 写死。
+    func test默认停在发现与确认页() {
+        // issue #16：概览页当时还是占位；issue #28 之后概览页也是真实页面，
+        // 但默认落地页保持不变（先确认工具才有占用可看），断言的是「默认落在已实现的一页」。
         XCTAssertEqual(WorkspaceShellModel.defaultSelection, .discovery)
         XCTAssertTrue(WorkspaceShellModel.defaultSelection.isImplemented)
     }
 
-    func test只有发现与确认是已实现的分栏() {
+    func test已实现的分栏是概览与发现与确认() {
+        // issue #16 做了发现与确认页，issue #28 做了概览页；其余三个仍是占位。
         XCTAssertEqual(
             WorkspaceSection.allCases.filter(\.isImplemented),
-            [.discovery],
-            "issue #16 的范围里只有这一页是真实页面"
+            [.overview, .discovery],
+            "已经做出来的分栏才允许摘掉占位文案"
         )
+    }
+
+    func test概览页的占位文案不再承诺本阶段做不到的事() {
+        // 概览页已经实现，它取到的说明必须是当前阶段的实话（只读、归档属下一里程碑），
+        // 而不能留着「深扫落地后展示可归档预计释放空间」那种对 M2 的预告。
+        let message = WorkspaceSection.overview.placeholderMessage
+
+        XCTAssertFalse(message.isEmpty)
+        XCTAssertFalse(message.contains("预计释放"), "M2 不做压缩节省 / 搬迁腾出的估算（PRD §9 的范围切分）")
+        XCTAssertTrue(message.contains("下一个里程碑"))
     }
 
     func test占位文案不承诺本阶段做不到的事() {

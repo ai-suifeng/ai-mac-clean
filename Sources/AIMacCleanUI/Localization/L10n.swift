@@ -49,7 +49,8 @@ public enum L10n {
         case sidebarAccessibilityArchived = "sidebar.accessibility.archived"
         case sidebarAccessibilitySettings = "sidebar.accessibility.settings"
 
-        case placeholderOverview = "placeholder.overview"
+        // 概览占位文案随 issue #28 下线：这一页已经是真实页面，
+        // 它取的说明改走 `overview.stage.note`（当前阶段的实话）。
         case placeholderArchive = "placeholder.archive"
         case placeholderArchived = "placeholder.archived"
         case placeholderSettings = "placeholder.settings"

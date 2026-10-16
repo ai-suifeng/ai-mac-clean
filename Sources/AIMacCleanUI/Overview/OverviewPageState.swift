@@ -95,9 +95,6 @@ public struct OverviewToolRow: Equatable, Identifiable {
     /// 「其中仅展示（不参与归档）：14 GB」——只有存在仅展示根时出现（PRD §14.1）。
     public let displayOnlyText: String?
 
-    /// 本工具的四类分列。
-    public let categoryRows: [OverviewCategoryRow]
-
     /// 辅助技术读出的一句话。
     public let accessibilityLabel: String
 

@@ -15,7 +15,6 @@
 "sidebar.accessibility.archived" = "Archived: browse, search and restore";
 "sidebar.accessibility.settings" = "Settings: archive location and confirmed tools";
 
-"placeholder.overview" = "Overview will show total usage and estimated reclaimable space once deep scanning lands. There is no archiving capability in this milestone.";
 "placeholder.archive" = "Archiving becomes available once self-verifying archives land. This milestone never moves or deletes a file.";
 "placeholder.archived" = "Browsing and restoring archives arrive in a later milestone.";
 "placeholder.settings" = "Archive location and confirmed-tool management arrive in a later milestone.";

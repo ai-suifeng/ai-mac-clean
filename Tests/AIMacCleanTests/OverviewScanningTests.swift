@@ -117,6 +117,32 @@ final class OverviewScanningTests: XCTestCase {
         XCTAssertNotNil(model.scanningText)
     }
 
+    /// 已确认工具变了（例如用户刚在发现页确认了一台），上一轮的数字就不再对应现在这批工具。
+    /// 扫描期间宁可什么都不显示，也不许把一个属于别人的 0 摆出来。
+    func test已确认工具变了之后扫描期间不显示上一轮的数字() throws {
+        let manual = ManualScheduler()
+        let (model, fixture) = try makeModel(
+            scheduler: manual.scheduler,
+            scanner: StubOccupancyScanner(report: report(archivableBytes: 1_048_576))
+        )
+        defer { fixture.remove() }
+
+        model.load()
+        manual.runNextScan()
+        XCTAssertEqual(model.totalText, "总占用：1 MB（1 个文件）")
+
+        // 用户刚确认了第二台工具：工具集合变了。
+        try fixture.confirm(id: "codex-cli", root: fixture.toolRoot(".codex"))
+        model.reload()
+
+        XCTAssertTrue(model.state.isScanning)
+        XCTAssertNil(model.totalText, "旧数字对应的是上一批工具，扫描期间不许拿它充数")
+        XCTAssertFalse(model.isEmpty)
+
+        manual.runNextScan()
+        XCTAssertNotNil(model.totalText, "新结果回来之后照常显示")
+    }
+
     // MARK: - 生产调度器
 
     /// 扫描与容量读取都要在调用线程（主线程）之外完成。
