@@ -343,6 +343,202 @@ final class SessionGroupingTests: XCTestCase {
         ])
     }
 
+    // MARK: - Cursor（验收 3）
+
+    func testCursor主转录与同会话的子代理转录级联() throws {
+        let fixture = try DeepScanFixture(named: "session-cursor")
+        defer { fixture.remove() }
+
+        let sessionID = "88888888-8888-8888-8888-888888888888"
+        let firstSubagent = "99999999-9999-9999-9999-999999999999"
+        let secondSubagent = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        let directory = ".cursor/projects/-Users-x-a/agent-transcripts/\(sessionID)"
+        try fixture.write("\(directory)/\(sessionID).jsonl", bytes: 700)
+        try fixture.write("\(directory)/subagents/\(firstSubagent).jsonl", bytes: 300)
+        try fixture.write("\(directory)/subagents/\(secondSubagent).jsonl", bytes: 50)
+        // 规则保守归入「不确定」的 `assets/`：不进会话。
+        try fixture.write(".cursor/assets/未实测.bin", bytes: 64)
+
+        let report = try group(fixture, tools: [cursorTool(fixture)])
+        let tool = try XCTUnwrap(report.toolReport(id: "cursor"))
+
+        XCTAssertEqual(tool.sessions.count, 1)
+        let session = try XCTUnwrap(tool.sessions.first)
+        XCTAssertEqual(session.id, sessionID)
+        XCTAssertEqual(session.project, .encodedDirectory(name: "-Users-x-a", scheme: .singleDash))
+        XCTAssertEqual(session.occupancy, Occupancy(bytes: 1050, fileCount: 3))
+        XCTAssertEqual(session.files.map(\.role), [.mainTranscript, .subagentTranscript, .subagentTranscript])
+        XCTAssertEqual(session.files.map(\.bytes), [700, 300, 50],
+                       "文件按相对路径排序：子代理转录里 `9999…` 排在 `aaaa…` 前面（字典序，不是大小序）")
+        XCTAssertEqual(tool.unmatched, [])
+    }
+
+    /// 会话 ID 的来源按规则声明办：Cursor 的规则声明 `sessionIDSource: fileName`，
+    /// 因此文件名与目录名不一致时**以文件名为准**。引擎不去猜「目录名才是会话」——
+    /// 那是把规则声明当建议，会让同一份规则在不同工具上给出两套语义。
+    func testCursor会话ID以规则声明的文件名为准() throws {
+        let fixture = try DeepScanFixture(named: "session-cursor-file-name-wins")
+        defer { fixture.remove() }
+
+        let directoryID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        let fileID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        let directory = ".cursor/projects/-Users-x-a/agent-transcripts/\(directoryID)"
+        try fixture.write("\(directory)/\(fileID).jsonl", bytes: 40)
+        try fixture.write("\(directory)/subagents/dddddddd-dddd-dddd-dddd-dddddddddddd.jsonl", bytes: 5)
+
+        let report = try group(fixture, tools: [cursorTool(fixture)])
+        let tool = try XCTUnwrap(report.toolReport(id: "cursor"))
+
+        XCTAssertEqual(tool.sessions.map(\.id), [fileID])
+        XCTAssertEqual(tool.sessions.first?.files.count, 2, "子代理转录仍然按所在目录挂上来")
+    }
+
+    // MARK: - DeepSeek Harness（验收 4）
+
+    /// Harness 一个会话一个文件、文件名固定，会话 ID 在**父目录名**里
+    /// （规则声明 `sessionIDSource: parentDirectoryName`）。
+    func testHarness会话ID取自父目录名且双横线编码不反向解码() throws {
+        let fixture = try DeepScanFixture(named: "session-harness")
+        defer { fixture.remove() }
+
+        let sessionID = "66666666-6666-6666-6666-666666666666"
+        let root = "Library/Application Support/deepseek-harness-desktop/harness-home"
+        try fixture.write("\(root)/sessions/--Users-x-a--/session-\(sessionID)/session.jsonl.zstd", bytes: 150)
+        try fixture.write("\(root)/sessions/--Users-x-a--/session-\(sessionID)/其他.txt", bytes: 7)
+        try fixture.write("\(root)/settings.yaml", bytes: 20)
+
+        let report = try group(fixture, tools: [harnessTool(fixture)])
+        let tool = try XCTUnwrap(report.toolReport(id: "deepseek-harness"))
+
+        XCTAssertEqual(tool.sessions.count, 1)
+        let session = try XCTUnwrap(tool.sessions.first)
+        XCTAssertEqual(session.id, "session-\(sessionID)", "会话 ID 就是父目录名，原样取用")
+        XCTAssertEqual(session.occupancy, Occupancy(bytes: 150, fileCount: 1), "同目录里没声明的文件不算会话文件")
+        XCTAssertEqual(
+            session.project,
+            .encodedDirectory(name: "--Users-x-a--", scheme: .doubleDash),
+            "双横线编码原样展示：不反向解码（PRD §5.3）"
+        )
+        XCTAssertEqual(tool.unmatched, [])
+        XCTAssertEqual(tool.sessions.first?.files.map(\.relativePath), [
+            "sessions/--Users-x-a--/session-\(sessionID)/session.jsonl.zstd",
+        ])
+    }
+
+    /// 不同项目的会话各自带上自己的项目名（项目是**每个会话**的属性，不是一把全局的）。
+    func test不同项目的会话各自带上自己的项目编码名() throws {
+        let fixture = try DeepScanFixture(named: "session-project-per-session")
+        defer { fixture.remove() }
+
+        let first = "dddddddd-1111-1111-1111-111111111111"
+        let second = "eeeeeeee-2222-2222-2222-222222222222"
+        try fixture.write(".claude/projects/-Users-x-a/\(first).jsonl", bytes: 10)
+        try fixture.write(".claude/projects/-Users-x-b/\(second).jsonl", bytes: 20)
+
+        let report = try group(fixture, tools: [claudeTool(fixture)])
+        let tool = try XCTUnwrap(report.toolReport(id: "claude-code"))
+
+        XCTAssertEqual(tool.sessions.map(\.id), [first, second])
+        XCTAssertEqual(tool.sessions.map(\.project), [
+            .encodedDirectory(name: "-Users-x-a", scheme: .singleDash),
+            .encodedDirectory(name: "-Users-x-b", scheme: .singleDash),
+        ])
+    }
+
+    // MARK: - 符号链接（验收 7）
+
+    func test符号链接不参与会话归组() throws {
+        let fixture = try DeepScanFixture(named: "session-symlinks")
+        defer { fixture.remove() }
+
+        let real = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        let linked = "abababab-abab-abab-abab-abababababab"
+        try fixture.write(".claude/projects/-Users-x-a/\(real).jsonl", bytes: 400)
+        try fixture.makeSymbolicLink(".claude/projects/-Users-x-a/\(linked).jsonl", to: "\(real).jsonl")
+        try fixture.write("外部数据/big.bin", bytes: 1_000_000)
+        try fixture.makeSymbolicLink(
+            ".claude/projects/-Users-x-a/外部链接.jsonl",
+            to: fixture.root.appendingPathComponent("外部数据").path
+        )
+
+        let report = try group(fixture, tools: [claudeTool(fixture)])
+        let tool = try XCTUnwrap(report.toolReport(id: "claude-code"))
+
+        XCTAssertEqual(tool.sessions.map(\.id), [real], "链接不建立会话、也不并进别的会话")
+        XCTAssertEqual(tool.sessions.first?.occupancy, Occupancy(bytes: 400, fileCount: 1))
+        XCTAssertEqual(
+            tool.unfollowedLinks.map(\.relativePath).sorted(),
+            ["projects/-Users-x-a/\(linked).jsonl", "projects/-Users-x-a/外部链接.jsonl"],
+            "链接要么在工具根内、要么在工具根外，两种都不跟随"
+        )
+        XCTAssertEqual(tool.unfollowedLinks.filter(\.isInsideToolRoot).count, 1)
+    }
+
+    // MARK: - 无法归组的可归档文件（范围最后一条）
+
+    /// 规则声明为可归档、却不符合任何会话形状的散落文件必须**如实呈现**，
+    /// 既不静默丢弃，也不硬塞进某个会话。
+    func test不符合任何会话形状的可归档文件如实呈现为未归组() throws {
+        let fixture = try DeepScanFixture(named: "session-shapeless")
+        defer { fixture.remove() }
+
+        let sessionID = "12121212-1212-1212-1212-121212121212"
+        try fixture.write("mystery/projects/-Users-x-a/\(sessionID).jsonl", bytes: 100)
+        try fixture.write("mystery/projects/-Users-x-a/散落.jsonl", bytes: 20)
+        let toolRoot = fixture.rootPath + "/mystery"
+
+        let rules = try admittedRules(["""
+        {
+          "schemaVersion": 1,
+          "id": "mystery",
+          "displayName": "神秘工具",
+          "roots": [{ "path": "\(toolRoot)", "role": "toolRoot" }],
+          "structuralFingerprint": {
+            "sessionFilePatterns": ["projects/<encodedPath>/<uuid>.jsonl"]
+          },
+          "projectPathEncoding": { "scheme": "singleDash" },
+          "classification": [
+            { "pattern": "projects/**", "category": "archivableSession" }
+          ]
+        }
+        """])
+
+        let report = SessionGrouper(fileSystem: RealDiscoveryFileSystem()).group(
+            tools: [ConfirmedTool(id: "mystery", displayName: "神秘工具", toolRootPath: toolRoot)],
+            rules: rules,
+            homeDirectory: fixture.rootPath
+        )
+
+        let tool = try XCTUnwrap(report.toolReport(id: "mystery"))
+        XCTAssertEqual(tool.sessions.map(\.id), [sessionID])
+        XCTAssertEqual(tool.sessions.first?.occupancy, Occupancy(bytes: 100, fileCount: 1))
+        XCTAssertEqual(tool.unmatched.map(\.relativePath), ["projects/-Users-x-a/散落.jsonl"])
+        XCTAssertEqual(tool.unmatched.map(\.gap), [.shapeNotDeclared])
+        XCTAssertEqual(tool.unmatched.first?.pattern, "projects/**")
+        XCTAssertEqual(tool.archivableOccupancy, Occupancy(bytes: 120, fileCount: 2),
+                       "未归组的可归档文件仍然算在这台工具的可归档占用里（不许凭空消失）")
+    }
+
+    /// 用户确认过、但规则里没有对应规则的工具：照常出现在结果里，只是没有会话。
+    func test没有对应规则的工具照常出现在结果里且没有会话() throws {
+        let fixture = try DeepScanFixture(named: "session-unknown-tool")
+        defer { fixture.remove() }
+
+        try fixture.write("mystery-tool/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 100)
+
+        let report = try group(fixture, tools: [ConfirmedTool(
+            id: "mystery-tool",
+            displayName: "神秘工具",
+            toolRootPath: fixture.rootPath + "/mystery-tool"
+        )])
+
+        let tool = try XCTUnwrap(report.toolReport(id: "mystery-tool"))
+        XCTAssertEqual(tool.toolRootPath, fixture.rootPath + "/mystery-tool")
+        XCTAssertEqual(tool.sessions, [], "没有规则就没有可归档，也就没有会话")
+        XCTAssertEqual(tool.unmatched, [])
+        XCTAssertEqual(tool.archivableOccupancy, Occupancy())
+    }
+
     // MARK: - 夹具与断言助手
 
     private func group(
@@ -369,6 +565,22 @@ final class SessionGroupingTests: XCTestCase {
             id: "codex-cli",
             displayName: "Codex CLI",
             toolRootPath: fixture.rootPath + "/.codex"
+        )
+    }
+
+    private func cursorTool(_ fixture: DeepScanFixture) -> ConfirmedTool {
+        ConfirmedTool(
+            id: "cursor",
+            displayName: "Cursor",
+            toolRootPath: fixture.rootPath + "/.cursor"
+        )
+    }
+
+    private func harnessTool(_ fixture: DeepScanFixture) -> ConfirmedTool {
+        ConfirmedTool(
+            id: "deepseek-harness",
+            displayName: "DeepSeek Harness",
+            toolRootPath: fixture.rootPath + "/Library/Application Support/deepseek-harness-desktop/harness-home"
         )
     }
 
