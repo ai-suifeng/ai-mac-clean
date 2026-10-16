@@ -22,6 +22,7 @@
 
 /* Discovery & Confirm */
 "discovery.page.title" = "Discover & Confirm";
+"discovery.status.scanning" = "Scanning… (reads metadata and file headers only; nothing is modified)";
 "discovery.action.reload" = "Scan Again";
 "discovery.group.high" = "High confidence: structural fingerprint + external evidence";
 "discovery.group.medium" = "Medium confidence: structural fingerprint only";

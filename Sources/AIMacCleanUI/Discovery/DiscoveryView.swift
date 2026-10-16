@@ -40,8 +40,21 @@ public struct DiscoveryView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            if model.state.isScanning {
+                // 扫描在后台跑（issue #21）：界面保持可交互，并如实说明正在做什么。
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(L10n.text(.discoveryScanning))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(L10n.text(.discoveryScanning))
+            }
             Button(L10n.text(.discoveryReload)) { model.reload() }
                 .keyboardShortcut("r", modifiers: .command)
+                .disabled(model.state.isScanning)
                 .accessibilityLabel(L10n.text(.discoveryReload))
         }
     }

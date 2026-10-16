@@ -29,6 +29,9 @@ public final class DiscoveryPageModel: ObservableObject {
     private let homeDirectory: String
     private let now: () -> Date
 
+    /// 「扫描」与「更新状态」分别跑在哪条线程上（issue #21）。
+    private let scheduler: DiscoveryScheduler
+
     /// 用户手动改过的折叠状态，跨重新扫描保留。
     private var expansionOverrides: [ConfidenceTier: Bool] = [:]
 
@@ -46,13 +49,15 @@ public final class DiscoveryPageModel: ObservableObject {
         store: ConfirmationStore,
         settings: ConfirmationSettings?,
         homeDirectory: String,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        scheduler: DiscoveryScheduler = .immediate
     ) {
         self.source = source
         self.store = store
         self.settings = settings
         self.homeDirectory = homeDirectory
         self.now = now
+        self.scheduler = scheduler
         self.latestRun = DiscoveryRun()
         self.state = DiscoveryPageState()
     }
@@ -67,16 +72,32 @@ public final class DiscoveryPageModel: ObservableObject {
             source: DiscoveryService.standard(homeDirectory: homeDirectory),
             store: store,
             settings: settings,
-            homeDirectory: homeDirectory
+            homeDirectory: homeDirectory,
+            // 生产：扫描放到后台，界面不被 3 秒的 I/O 冻住（issue #21）。
+            scheduler: .background()
         )
     }
 
     // MARK: - 生命周期
 
     /// 跑一次发现并铺开状态。视图出现时调用；重复调用等价于重新扫描。
+    ///
+    /// **扫描不在调用线程上跑**（issue #21）：一次发现要遍历工具根、读文件头，本机实测
+    /// 约 3 秒，同步执行会把界面冻住。这里只置「正在扫描」并把工作交给调度器，
+    /// 完成后回主线程更新状态。扫描进行中重复调用直接忽略，不排队第二次扫描。
     public func load() {
-        latestRun = source.run()
-        rebuildState()
+        guard !state.isScanning else { return }
+        state.isScanning = true
+
+        scheduler.runScan { [weak self] in
+            guard let self else { return }
+            let run = self.source.run()
+            self.scheduler.runOnMain { [weak self] in
+                guard let self else { return }
+                self.latestRun = run
+                self.rebuildState()
+            }
+        }
     }
 
     /// 「重新扫描」按钮。
@@ -296,6 +317,7 @@ public final class DiscoveryPageModel: ObservableObject {
         state.unreadableDirectories = result.unreadableDirectories
         state.issues = latestRun.issues
         state.hasLoaded = true
+        state.isScanning = false
     }
 
     /// 「低」档（纯名称命中）默认折叠；其余展开（User Story 4）。

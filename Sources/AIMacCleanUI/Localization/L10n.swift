@@ -56,6 +56,7 @@ public enum L10n {
 
         // 发现与确认页
         case discoveryPageTitle = "discovery.page.title"
+        case discoveryScanning = "discovery.status.scanning"
         case discoveryReload = "discovery.action.reload"
         case discoveryGroupHigh = "discovery.group.high"
         case discoveryGroupMedium = "discovery.group.medium"

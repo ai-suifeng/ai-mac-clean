@@ -25,6 +25,7 @@
 
 /* MARK: - 发现与确认页 */
 "discovery.page.title" = "发现与确认";
+"discovery.status.scanning" = "正在扫描…（只读元数据与文件头，不动任何文件）";
 "discovery.action.reload" = "重新扫描";
 "discovery.group.high" = "高置信度：结构指纹 + 外部佐证";
 "discovery.group.medium" = "中置信度：仅结构指纹";

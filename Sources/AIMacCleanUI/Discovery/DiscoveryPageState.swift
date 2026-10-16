@@ -29,6 +29,9 @@ public struct DiscoveryPageState: Equatable {
     /// 是否已经跑过一次发现。
     public var hasLoaded: Bool
 
+    /// 是否正在扫描（issue #21）。扫描在后台跑，界面据此禁用「重新扫描」并给出进度提示。
+    public var isScanning: Bool
+
     public init(
         pendingGroups: [CandidateGroup] = [],
         confirmedTools: [ConfirmedToolRow] = [],
@@ -36,7 +39,8 @@ public struct DiscoveryPageState: Equatable {
         unreadableDirectories: [UnreadableDirectory] = [],
         issues: [DiscoveryIssue] = [],
         lastActionFailure: String? = nil,
-        hasLoaded: Bool = false
+        hasLoaded: Bool = false,
+        isScanning: Bool = false
     ) {
         self.pendingGroups = pendingGroups
         self.confirmedTools = confirmedTools
@@ -45,6 +49,7 @@ public struct DiscoveryPageState: Equatable {
         self.issues = issues
         self.lastActionFailure = lastActionFailure
         self.hasLoaded = hasLoaded
+        self.isScanning = isScanning
     }
 }
 
