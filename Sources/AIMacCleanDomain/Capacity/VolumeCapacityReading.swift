@@ -76,7 +76,14 @@ public struct SystemVolumeCapacityReader: VolumeCapacityReading {
         guard let values = try? valuesSource(path) else {
             return .unknown(.volumeUnreadable)
         }
-        guard let total = values.total, let available = values.availableForImportantUsage else {
+        // 优先重要用途可用量（含可清理空间，和系统「关于本机 / 储存空间」的口径一致），
+        // 它缺失时才退回普通可用量：能给出数字就别显示「未知」。
+        guard
+            let total = values.total, total > 0,
+            let available = values.availableForImportantUsage ?? values.available, available >= 0
+        else {
+            // 数字缺失、为负、或总量为 0：都不是可展示的容量。
+            // 这里绝不回落到 0——0 是「盘满了」，是一个会误导用户的结论。
             return .unknown(.capacityNotReported)
         }
         return .measured(availableBytes: available, totalBytes: total)
