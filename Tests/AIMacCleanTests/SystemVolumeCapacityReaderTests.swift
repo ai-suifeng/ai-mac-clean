@@ -96,4 +96,42 @@ final class SystemVolumeCapacityReaderTests: XCTestCase {
             .unknown(.volumeUnreadable)
         )
     }
+
+    // MARK: - 真实系统读数（只在临时目录上，不碰真实数据目录）
+
+    func test真实系统读数在临时目录上给出该卷的可用与总量() throws {
+        let fixture = try TemporaryDirectoryFixture(named: "volume-capacity")
+        defer { fixture.remove() }
+
+        let capacity = SystemVolumeCapacityReader().capacity(ofVolumeContaining: fixture.url.path)
+
+        guard case let .measured(availableBytes, totalBytes) = capacity else {
+            return XCTFail("临时目录所在卷应当能读到容量，实际是 \(capacity)")
+        }
+
+        // 独立真值：`FileManager` 的 statfs 读数与 `URL.resourceValues` 是两条不同的系统路径。
+        // 总量必须与它一致，否则说明读到的是别的卷。
+        let fileSystemAttributes = try FileManager.default.attributesOfFileSystem(forPath: fixture.url.path)
+        let systemSize = try XCTUnwrap((fileSystemAttributes[.systemSize] as? NSNumber)?.int64Value)
+        let systemFreeSize = try XCTUnwrap((fileSystemAttributes[.systemFreeSize] as? NSNumber)?.int64Value)
+
+        XCTAssertEqual(totalBytes, systemSize)
+        // 重要用途可用量按 SDK 文档「including space expected to be cleared by purging
+        // non-essential and cached resources」，不会低于 statfs 的自由空间。
+        XCTAssertGreaterThanOrEqual(availableBytes, systemFreeSize)
+        XCTAssertNotNil(capacity.availableText)
+        XCTAssertNotNil(capacity.totalText)
+    }
+
+    func test不存在的路径给出未知而不是零() throws {
+        let fixture = try TemporaryDirectoryFixture(named: "volume-capacity-missing")
+        defer { fixture.remove() }
+
+        let missing = fixture.url.appendingPathComponent("并不存在的工具根").path
+
+        XCTAssertEqual(
+            SystemVolumeCapacityReader().capacity(ofVolumeContaining: missing),
+            .unknown(.volumeUnreadable)
+        )
+    }
 }
