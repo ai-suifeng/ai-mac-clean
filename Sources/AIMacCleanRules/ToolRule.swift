@@ -37,6 +37,18 @@ public struct ToolRoot: Codable, Equatable, Sendable {
     var hasWellFormedPath: Bool {
         path.hasPrefix("~/") || path.hasPrefix("/")
     }
+
+    /// 声明路径展开成绝对路径：`~/…` 用调用方给的主目录，绝对路径原样返回（issue #31）。
+    ///
+    /// 只做字符串拼接、**不检查路径是否存在**：规则声明的路径在这台机器上缺失不是错误
+    /// （spec #7 User Story 22、PRD §5.4「规则容忍缺失」）。主目录由调用方显式传入，
+    /// 本类型不读 `NSHomeDirectory()`——测试因此能在临时目录树上跑。
+    public func absolutePath(homeDirectory: String) -> String {
+        guard path == "~" || path.hasPrefix("~/") else { return path }
+        let home = homeDirectory.hasSuffix("/") ? String(homeDirectory.dropLast()) : homeDirectory
+        let tail = path == "~" ? "" : String(path.dropFirst(2))
+        return tail.isEmpty ? home : home + "/" + tail
+    }
 }
 
 // MARK: - 结构指纹
