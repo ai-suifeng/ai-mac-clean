@@ -20,6 +20,21 @@ public enum VolumeCapacity: Equatable, Sendable {
     /// 读到了容量。
     case measured(availableBytes: Int64, totalBytes: Int64)
 
+    /// 读不到容量。**这是一个明确状态，不是 0**：0 会被读成「盘满了」，
+    /// 让用户以为该腾地方了（ticket #24 验收）。
+    case unknown(UnknownReason)
+
+    /// 读不到容量的原因。分开的原因不同，界面能给的话也不同：
+    /// 一个是「这台机器上读不到这个卷」，一个是「卷在，但系统没报容量」。
+    public enum UnknownReason: Equatable, Sendable {
+
+        /// 系统没能给出该路径所在卷的读数（路径不存在、无权限等）。
+        case volumeUnreadable
+
+        /// 读数拿到了，但里面没有可用的容量数字（总量缺失、可用空间缺失或为负）。
+        case capacityNotReported
+    }
+
     /// 剩余可用空间的展示文本；未知时为 `nil`。
     public var availableText: String? {
         guard case let .measured(availableBytes, _) = self else { return nil }
