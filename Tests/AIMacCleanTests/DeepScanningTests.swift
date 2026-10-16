@@ -102,6 +102,34 @@ final class DeepScanningTests: XCTestCase {
         )
     }
 
+    // MARK: - 验收 6：深扫全程零写入
+
+    func test深扫全程零写入即使树里有空目录与读不到的目录() throws {
+        let fixture = try DeepScanFixture(named: "zero-write")
+        defer { fixture.remove() }
+
+        let codex = try tool(fixture)
+        try fixture.write("codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 128)
+        try fixture.makeDirectory("codex/empty")
+        // 读不到的目录同样不许触发任何「顺手修一下权限」之类的写操作。
+        let locked = try fixture.makeDirectory("codex/locked")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+        }
+
+        let auditor = AuditorFileSystem()
+        let scan = try makeScanner(auditor).scan(
+            tools: [fixture.confirmed(codex)],
+            rules: [codex.rule],
+            homeDirectory: fixture.rootPath
+        )
+
+        XCTAssertEqual(scan.totalOccupancy, Occupancy(bytes: 128, fileCount: 1))
+        XCTAssertEqual(auditor.writeAttempts, [], "深扫只读：没有创建、没有覆写、没有移动、没有删除")
+        XCTAssertEqual(auditor.writeSummary, "零写入（没有任何写尝试）")
+    }
+
     // MARK: - 验收 2：四类各自的字节数与文件数
 
     func test四类各自的字节数与文件数正确且目录只算一次() throws {
