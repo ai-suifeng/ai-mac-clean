@@ -52,11 +52,18 @@ struct SessionShapeCatalog {
         pruningBases = unbounded ? [] : bases
     }
 
-    /// 目录是否值得进去：它的相对路径必须是某个字面前缀的前缀。
+    /// 目录是否值得进去：它的相对路径要么是某个字面前缀的祖先，要么落在这个字面前缀之下。
+    ///
+    /// 两种情况都要走：`sessions` 本身（= 字面前缀，进去才看得到会话文件）与
+    /// `sessions/2026/10/14`（在字面前缀之下，形状还要更深才命中）。
+    /// 反过来 `~/.codex/.tmp`、`~/.claude/plugins` 既不是任何字面前缀的祖先、也不在其下，
+    /// 于是整棵子树连列举都不必。
     func shouldDescend(into relativeDirectory: String) -> Bool {
         guard !pruningBases.isEmpty else { return true }
         return pruningBases.contains { base in
-            base == relativeDirectory || base.hasPrefix(relativeDirectory + "/")
+            base == relativeDirectory
+                || base.hasPrefix(relativeDirectory + "/")
+                || relativeDirectory.hasPrefix(base + "/")
         }
     }
 

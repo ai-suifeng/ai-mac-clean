@@ -305,7 +305,7 @@ private struct ToolGrouping {
             return Decision(association: .notArchivable, declaredBy: resolution.pattern)
         }
 
-        let declaredBy = resolution.pattern
+        let declaredBy = declaredPattern(for: fact.relativePath, resolution: resolution)
 
         // 3. 级联声明优先于「会话文件」：同一条路径既可能命中会话形状又命中级联
         //    （Claude 的 `agent-<uuid>.jsonl` 两边都有），而级联给出的角色更具体。
@@ -333,6 +333,23 @@ private struct ToolGrouping {
 
         // 5. 规则说它可归档，可它不符合任何会话形状：如实呈现，不静默丢弃。
         return Decision(association: .unmatched(.shapeNotDeclared), declaredBy: declaredBy)
+    }
+
+    /// 把这条路径声明为可归档的那条**最具体**的分类条目。
+    ///
+    /// 多条可归档条目同时盖住一条路径时（Codex 的 fork 文件名同时被
+    /// `rollout-<ISO>.jsonl[.zst]` 与带两个 UUID 的形态盖住），取最具体的那条：
+    /// 归组选形状用的是同一把尺子，清单里给出的理由因此与它一致，
+    /// 而不是取决于规则文件里的书写顺序。
+    private func declaredPattern(for relativePath: String, resolution: DeepScanRuleCatalog.RuleMatchResolution) -> String? {
+        guard let rule else { return resolution.pattern }
+        let matches = rule.classification.filter {
+            $0.category == .archivableSession && $0.pattern.matches(relativePath: relativePath)
+        }
+        guard let best = matches.min(by: { SessionShapeCatalog.isMoreSpecific($0.pattern, than: $1.pattern) }) else {
+            return resolution.pattern
+        }
+        return best.pattern.canonicalString
     }
 
     /// 会话文件所属项目的来源（PRD §5.3）。
