@@ -6,10 +6,11 @@ import AIMacCleanRules
 ///
 /// 深扫只跑在已确认工具上，入口因此是「已确认工具」而不是候选列表。
 /// 工具根路径用绝对路径：本类型的消费者已经把它从声明路径解析出来（浅扫与确认那一步），
-/// 深扫不再重复解析 `~`，也就不需要知道用户主目录在哪。
+/// 深扫不为它重复解析 `~`。
 ///
-/// 这里只给**主工具根**：规则为这个工具声明的仅展示根（`displayOnly`）由深扫自己从规则里取
-/// （issue #31）——规则声明了却忘记扫，正是「Cursor AppSupport 14G 没进占用」的成因。
+/// 这里只给**主工具根**：规则为这个工具声明的仅展示根（`displayOnly`）由深扫自己从规则里取、
+/// 用 `homeDirectory` 展开（issue #31）——规则声明了却忘记扫，正是
+/// 「Cursor AppSupport 14G 没进占用」的成因。
 public struct ConfirmedTool: Equatable, Hashable, Sendable {
 
     /// 工具标识，对应 `ToolRule.id`。
@@ -221,7 +222,7 @@ public struct ToolScanReport: Equatable, Sendable {
     /// 工具根目录的绝对路径。
     public let toolRootPath: String
 
-    /// 本工具的总占用（四类之和，含规则声明的仅展示根）。
+    /// 本工具的总占用（四类之和，含规则声明的仅展示根；恒等于 `roots` 各根之和）。
     public let occupancy: Occupancy
 
     /// 四类的占用，只列出**确实有东西**的那些（没有数据的类别不留占位空行）。
@@ -249,7 +250,7 @@ public struct ToolScanReport: Equatable, Sendable {
         toolRootPath: String,
         occupancy: Occupancy,
         categories: [CategoryOccupancy],
-        roots: [ToolRootOccupancy] = [],
+        roots: [ToolRootOccupancy],
         holdingDirectoryCount: Int,
         unreadable: [UnreadableEntry],
         unfollowedLinks: [UnfollowedLink]

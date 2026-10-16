@@ -221,7 +221,9 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
     /// （`ToolRoot.absolutePath(homeDirectory:)`，只拼字符串、不检查存在）。
     ///
     /// 去重：展开后与主根相同、或彼此相同的根只扫一次——同一棵树被两个根声明时
-    /// 算两遍就是虚报占用。
+    /// 算两遍就是虚报占用。与主根重合时**按主根算**：用户确认过的那个根本来就是归档范围
+    /// （规则把同一路径既声明成 `toolRoot` 又声明成 `displayOnly` 是规则自相矛盾，
+    /// 报告仍以已确认的主根为准）。
     private func scanRoots(
         for tool: ConfirmedTool,
         catalog: DeepScanRuleCatalog,

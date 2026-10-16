@@ -12,12 +12,14 @@ import XCTest
 /// 这些位置此前完全没进占用统计，于是概览页会显示「Cursor 只占 2.1G」——
 /// 与 PRD §14.1「Cursor AppSupport 14G、范围内可归档 0」的实况不符。
 ///
-/// 这一组用例钉住四件事（对应 ticket #31 的五条验收）：
+/// 这一组用例钉住五件事（对应 ticket #31 的五条验收）：
 ///
 /// 1. 工具总占用 = 主根 + 仅展示根，且报告能按根拆分（验收 1、3）。
 /// 2. 仅展示根内**零个字节**被算作可归档，各归「缓存与日志 / 受保护 / 不确定」之一（验收 2）。
 /// 3. 仅展示根缺失时静默跳过，不报错、不影响主根（验收 4）。
 /// 4. 访问范围仍只落在规则声明的根内，全程零写入（验收 5）。
+/// 5. 出厂规则端到端：PRD §14.1 的 Cursor AppSupport 与 Harness Electron profile 都进占用。
+///    另有一条覆盖**非目录形态**的根（`~/.claude.json` 这类，PRD §5.4）。
 final class DeepScanDisplayOnlyRootsTests: XCTestCase {
 
     private let archivable = "{\"pattern\": \"projects/**\", \"category\": \"archivableSession\"}"
