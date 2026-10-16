@@ -183,6 +183,19 @@ report.category(forRelativePath: path, ruleID: id, isBuiltInProtected: isProtect
 **不得用兜底 `**`**：`{ "pattern": "**", "category": … }` 会把受保护区一起吞掉，
 出厂规则里一条都没有（`BundledToolRuleTests.test内置规则的分类声明没有兜底通配`）。
 
+### 深扫怎么用这些根（issue #31）
+
+- **一个工具的所有已声明根都进占用**：深扫自己从规则里取该工具的根（主根 + `displayOnly` 根），
+  不要求调用方逐个传；`~/…` 用调用方给的主目录展开。`DeepScanReport` 的
+  `ToolScanReport.roots` 按根分列占用，概览页据此显示「Cursor 2.1G + 14G 只展示」（PRD §14.1）。
+- **`displayOnly` 根内的路径一律不可归档**：按规则声明落在缓存与日志 / 受保护 / 不确定三类之一，
+  未声明的落进不确定；规则若在其上声明了 `archivableSession`，深扫把它压回不确定
+  （PRD §2.3、§5.4：只展示、绝不动）。
+- **缺失的 `displayOnly` 根静默跳过**：不报错、不进「读不到」清单，也不算这个工具占用的贡献者
+  （PRD §5.4「规则容忍缺失」）。
+- **文件形态的根**（`~/.claude.json` 这类）照样进占用，但分类只可能来自内置受保护清单或不确定
+  ——规则的模式都相对**根**匹配，某个路径相对它就是它自己，谁也匹配不到它。
+
 ## 自带压缩与会话文件名形态
 
 ```jsonc

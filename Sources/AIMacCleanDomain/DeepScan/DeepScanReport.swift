@@ -6,7 +6,11 @@ import AIMacCleanRules
 ///
 /// 深扫只跑在已确认工具上，入口因此是「已确认工具」而不是候选列表。
 /// 工具根路径用绝对路径：本类型的消费者已经把它从声明路径解析出来（浅扫与确认那一步），
-/// 深扫不再重复解析 `~`，也就不需要知道用户主目录在哪。
+/// 深扫不为它重复解析 `~`。
+///
+/// 这里只给**主工具根**：规则为这个工具声明的仅展示根（`displayOnly`）由深扫自己从规则里取、
+/// 用 `homeDirectory` 展开（issue #31）——规则声明了却忘记扫，正是
+/// 「Cursor AppSupport 14G 没进占用」的成因。
 public struct ConfirmedTool: Equatable, Hashable, Sendable {
 
     /// 工具标识，对应 `ToolRule.id`。
@@ -44,8 +48,9 @@ public enum CategoryProvenance: Equatable, Hashable, Sendable {
 /// 某个「工具 → 类别 → 子路径」下的占用汇总。
 public struct CategorySummary: Equatable, Hashable, Sendable {
 
-    /// 子路径：相对工具根，指向**命中规则的那一层**（`projects`、`.tmp`），
-    /// 或者未声明路径的顶层目录名。工具根直接挂着的文件用它自己的名字。
+    /// 子路径：相对**所属根**（主工具根或规则声明的仅展示根，issue #31），
+    /// 指向**命中规则的那一层**（`projects`、`.tmp`），
+    /// 或者未声明路径的顶层目录名。根直接挂着的文件用它自己的名字。
     public let subpath: String
 
     /// 这次汇总到的分类条目（按模式串原样给出），界面据此说明「这条为什么是这一类」。
@@ -120,7 +125,7 @@ public struct UnreadableEntry: Equatable, Sendable {
     /// 读不到的位置：目录的绝对路径，或查不到属性的条目路径。
     public let path: String
 
-    /// 相对工具根的路径，便于界面归到某个工具名下。
+    /// 相对**所属根**（主工具根或规则声明的仅展示根）的路径，便于界面归到某个工具名下。
     public let relativePath: String
 
     /// 所属工具的标识。
@@ -161,7 +166,7 @@ public struct UnfollowedLink: Equatable, Sendable {
     /// 链接自身的路径（绝对）。
     public let path: String
 
-    /// 相对工具根的路径。
+    /// 相对**所属根**（主工具根或规则声明的仅展示根）的路径。
     public let relativePath: String
 
     /// 所属工具的标识。
@@ -170,7 +175,7 @@ public struct UnfollowedLink: Equatable, Sendable {
     /// 链接指向哪里（原样读出，未解析成绝对路径）。
     public let destination: String?
 
-    /// 链接目标是否落在本工具根内部。
+    /// 链接目标是否落在**所属根**内部。
     public let isInsideToolRoot: Bool
 
     public init(path: String, relativePath: String, toolID: String, destination: String?, isInsideToolRoot: Bool) {
@@ -179,6 +184,32 @@ public struct UnfollowedLink: Equatable, Sendable {
         self.toolID = toolID
         self.destination = destination
         self.isInsideToolRoot = isInsideToolRoot
+    }
+}
+
+/// 一个**根**在这一次深扫里的占用（issue #31）。
+///
+/// 一个工具的占用可能由多个规则声明的根贡献：主工具根（`~/.cursor`，归档范围）
+/// 与仅展示根（`~/Library/Application Support/Cursor`，只展示、绝不动）。
+/// 概览页据此如实显示「Cursor 2.1G + 14G 只展示」（PRD §14.1）——
+/// 把两者合成一个数会让用户以为 Cursor 只占 2.1G。
+///
+/// `path` 是**绝对路径**：规则里的 `~/…` 在进深扫之前已经展开。
+public struct ToolRootOccupancy: Equatable, Hashable, Sendable {
+
+    /// 根的绝对路径。
+    public let path: String
+
+    /// 根的角色：主工具根（归档范围）或仅展示根。
+    public let role: ToolRootRole
+
+    /// 这个根贡献的占用。
+    public let occupancy: Occupancy
+
+    public init(path: String, role: ToolRootRole, occupancy: Occupancy) {
+        self.path = path
+        self.role = role
+        self.occupancy = occupancy
     }
 }
 
@@ -191,12 +222,18 @@ public struct ToolScanReport: Equatable, Sendable {
     /// 工具根目录的绝对路径。
     public let toolRootPath: String
 
-    /// 本工具的总占用（四类之和）。
+    /// 本工具的总占用（四类之和，含规则声明的仅展示根；恒等于 `roots` 各根之和）。
     public let occupancy: Occupancy
 
     /// 四类的占用，只列出**确实有东西**的那些（没有数据的类别不留占位空行）。
     /// 顺序固定为 PRD §5.1 的表格顺序。
     public let categories: [CategoryOccupancy]
+
+    /// 本工具的占用由哪几个根贡献：主工具根在前，规则声明的仅展示根按声明顺序在后。
+    ///
+    /// 没被扫到的根不在这个列表里——**缺失的仅展示根静默跳过**（PRD §5.4「规则容忍缺失」），
+    /// 而主工具根永远在（它是扫描原点，哪怕一个字节都读不到）。
+    public let roots: [ToolRootOccupancy]
 
     /// 本工具下所有「直接装着文件」的目录数（同一目录只数一次，工具根本身不算）。
     public let holdingDirectoryCount: Int
@@ -213,6 +250,7 @@ public struct ToolScanReport: Equatable, Sendable {
         toolRootPath: String,
         occupancy: Occupancy,
         categories: [CategoryOccupancy],
+        roots: [ToolRootOccupancy],
         holdingDirectoryCount: Int,
         unreadable: [UnreadableEntry],
         unfollowedLinks: [UnfollowedLink]
@@ -222,6 +260,7 @@ public struct ToolScanReport: Equatable, Sendable {
         self.toolRootPath = toolRootPath
         self.occupancy = occupancy
         self.categories = categories
+        self.roots = roots
         self.holdingDirectoryCount = holdingDirectoryCount
         self.unreadable = unreadable
         self.unfollowedLinks = unfollowedLinks
@@ -235,6 +274,21 @@ public struct ToolScanReport: Equatable, Sendable {
     /// 本工具可归档会话的占用（PRD §9 的「可归档占比」）。
     public var archivableOccupancy: Occupancy {
         category(.archivableSession)?.occupancy ?? Occupancy()
+    }
+
+    /// **主工具根**贡献的占用（归档范围的占用）。
+    ///
+    /// 与 `archivableOccupancy` 不是一回事：这里说的是「归档范围有多大」，
+    /// 后者说的是「范围内真正能归档的字节有多少」。仅展示根一个字节都不算进来。
+    public var toolRootOccupancy: Occupancy {
+        Occupancy.sum(roots.filter { $0.role == .toolRoot }.map(\.occupancy))
+    }
+
+    /// **仅展示根**合计（PRD §14.1 的「Cursor AppSupport 14G」）。
+    ///
+    /// 这部分永远不进可归档：它只出现在占用里，用于如实展示（PRD §2.3、§5.4）。
+    public var displayOnlyOccupancy: Occupancy {
+        Occupancy.sum(roots.filter { $0.role == .displayOnly }.map(\.occupancy))
     }
 }
 

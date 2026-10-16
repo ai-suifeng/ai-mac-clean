@@ -71,6 +71,8 @@ final class DeepScanFixture {
     struct Tool {
         let displayName: String
         let rootPath: String
+        /// 规则里声明的**仅展示**根（issue #31）的绝对路径：`~/…` 展开到夹具根。
+        let displayOnlyRootPaths: [String]
         let rule: ToolRule
         let requested: ConfirmedTool
     }
@@ -79,22 +81,29 @@ final class DeepScanFixture {
     ///
     /// `classificationJSON` 是分类条目的 JSON 数组片段，例如
     /// `["{\"pattern\": \"projects/**\", \"category\": \"archivableSession\"}"]`。
+    ///
+    /// `displayOnlyRelativeRoots` 是规则里**仅展示根**的相对位置（issue #31）：
+    /// 写成 `~/…` 声明，与出厂规则（Cursor AppSupport、Harness 的 Electron profile）
+    /// 同一套写法——深扫因此要自己把 `~/` 展开到 `homeDirectory`。
     func tool(
         id: String,
         displayName: String,
         relativeRoot: String,
+        displayOnlyRelativeRoots: [String] = [],
         classificationJSON: [String] = []
     ) throws -> Tool {
         let absoluteRoot = root.appendingPathComponent(relativeRoot).path
         let classification = classificationJSON.isEmpty ? "" : ",\n    \"classification\": [\n      " +
             classificationJSON.joined(separator: ",\n      ") + "\n    ]"
+        var rootDeclarations = ["{ \"path\": \"\(absoluteRoot)\", \"role\": \"toolRoot\" }"]
+        rootDeclarations += displayOnlyRelativeRoots.map { "{ \"path\": \"~/\($0)\", \"role\": \"displayOnly\" }" }
 
         let json = """
         {
           "schemaVersion": 1,
           "id": "\(id)",
           "displayName": "\(displayName)",
-          "roots": [{ "path": "\(absoluteRoot)", "role": "toolRoot" }]\(classification)
+          "roots": [\(rootDeclarations.joined(separator: ", "))]\(classification)
         }
         """
 
@@ -107,6 +116,7 @@ final class DeepScanFixture {
         return Tool(
             displayName: displayName,
             rootPath: absoluteRoot,
+            displayOnlyRootPaths: displayOnlyRelativeRoots.map { rootPath + "/" + $0 },
             rule: usable,
             requested: ConfirmedTool(id: id, displayName: displayName, toolRootPath: absoluteRoot)
         )

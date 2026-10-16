@@ -93,6 +93,10 @@ final class DeepScanScaleTests: XCTestCase {
         let started = Date()
         let report = try XCTUnwrap(domain.scan().toolReports.first)
         let elapsed = Date().timeIntervalSince(started)
+        // 打出来是为了让标定出处留在 CI 日志里：时限改了、机器换了，都能一眼看出差多少。
+        print("▸ 深扫规模：\(domain.manifest.shape.totalFileCount) 文件 / "
+            + "\(domain.manifest.shape.totalBytes) 字节，耗时 \(String(format: "%.3f", elapsed))s"
+            + "（时限 \(budgetSeconds)s）")
 
         XCTAssertLessThanOrEqual(
             elapsed,
