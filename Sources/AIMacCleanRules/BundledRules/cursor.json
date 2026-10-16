@@ -41,7 +41,12 @@
     { "pattern": "assets/**", "category": "uncertain", "note": "PRD §5.4：形态未实测，保守归入不确定，仅展示占用。" },
     { "pattern": "canvases/**", "category": "uncertain", "note": "同上。" },
     { "pattern": "mcps/**", "category": "uncertain", "note": "同上。" },
-    { "pattern": "terminals/**", "category": "uncertain", "note": "同上。" }
+    { "pattern": "terminals/**", "category": "uncertain", "note": "同上。" },
+    { "pattern": "User/**", "category": "uncertain", "note": "Cursor AppSupport（`~/Library/Application Support/Cursor`，实测 14G，其中 `User/` 13G）是 Electron / VSCode 内部存储：IndexedDB、Local Storage 等属 PRD §5.1 点名的「无法安全分类」，仅展示占用、不归档（PRD §5.4、§2.3）。这条模式作用于该 displayOnly 根。" },
+    { "pattern": "Cache/**", "category": "cacheAndLog", "note": "Electron / VSCode 标准缓存目录（PRD §5.1 点名 Cache）：仅展示占用，不动（PRD §2.3）。" },
+    { "pattern": "Code Cache/**", "category": "cacheAndLog", "note": "同上（Code Cache）。" },
+    { "pattern": "GPUCache/**", "category": "cacheAndLog", "note": "同上（GPUCache）。" },
+    { "pattern": "logs/**", "category": "cacheAndLog", "note": "同上（logs）。" }
   ],
   "selfCompressed": false,
   "sessionFileNaming": {

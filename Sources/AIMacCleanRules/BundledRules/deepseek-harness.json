@@ -30,7 +30,13 @@
     { "pattern": "settings.yaml", "category": "protected", "note": "配置。" },
     { "pattern": ".credentials.yaml", "category": "protected", "note": "登录凭证，永不触碰。" },
     { "pattern": "storages/**", "category": "protected", "note": "应用存储。" },
-    { "pattern": "profiles/**", "category": "protected", "note": "配置档案。" }
+    { "pattern": "profiles/**", "category": "protected", "note": "配置档案。" },
+    { "pattern": "Cache/**", "category": "cacheAndLog", "note": "另一处纯 Electron profile（`~/Library/Application Support/@deepseek-ai/dsh-desktop`，实测 7.0M，无会话数据）的标准缓存目录：仅展示占用，不动（PRD §5.4、§2.3）。" },
+    { "pattern": "Code Cache/**", "category": "cacheAndLog", "note": "同上（Code Cache）。" },
+    { "pattern": "GPUCache/**", "category": "cacheAndLog", "note": "同上（GPUCache）。" },
+    { "pattern": "logs/**", "category": "cacheAndLog", "note": "同上（logs）。" },
+    { "pattern": "Local Storage/**", "category": "uncertain", "note": "同上：Electron 的 Local Storage 属 PRD §5.1 点名的「无法安全分类」，仅展示占用、不归档。" },
+    { "pattern": "IndexedDB/**", "category": "uncertain", "note": "同上（IndexedDB）。" }
   ],
   "selfCompressed": true,
   "sessionFileNaming": {
