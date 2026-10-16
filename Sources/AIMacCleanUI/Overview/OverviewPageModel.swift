@@ -94,8 +94,9 @@ public final class OverviewPageModel: ObservableObject {
         homeDirectory: String = NSHomeDirectory(),
         language: AppLanguage? = nil
     ) -> OverviewPageModel {
-        // 两条入口共用的那一个深扫接线（`DeepScanService` 同时是 `DeepScanSource`
-        // 与 `ConfirmedToolScanning`）：注入替身时才现建，免得白白构造一个不用的服务。
+        // 两条入口共用同一个实例（`DeepScanService` 同时是 `DeepScanSource` 与
+        // `ConfirmedToolScanning`）：这样「规则配上了没有」与「报告是从哪来的」
+        // 不可能分叉——它们本来就是同一次装配的两面。
         let service = DeepScanService.standard(homeDirectory: homeDirectory)
         return OverviewPageModel(
             store: store,
@@ -116,6 +117,9 @@ public final class OverviewPageModel: ObservableObject {
     /// **扫描不在调用线程上跑**（issue #21）。扫描期间**不清空已有结果**：
     /// 上一轮的数字原样留在界面上，用户点「重新扫描」不会看到页面先空一下（验收 6）。
     /// 扫描进行中重复调用直接忽略，不排队第二次扫描。
+    ///
+    /// **运行级问题存在时根本不扫**（ticket #32）：先问 `issueSource`，没有可用规则就
+    /// 直接带着问题收工——没有可判定的分类时，扫出来的数字一个都解释不了。
     public func load() {
         guard !state.isScanning else { return }
 
