@@ -27,6 +27,16 @@ extension DataCategory {
     /// 给一个可点的归档入口——它现在读到的就是「没有哪一类可以归档」。
     public var isArchivableNow: Bool { false }
 
-    /// 四类的固定展示顺序（PRD §5.1 表格顺序），与枚举声明顺序一致。
-    public static var displayOrder: [DataCategory] { allCases }
+    /// 四类的固定展示顺序：PRD §5.1 表格的行顺序
+    /// （可归档会话 / 缓存与日志 / 受保护 / 不确定）。
+    ///
+    /// **显式写出来，不写成 `allCases`**：界面的行顺序是产品口径，不是枚举声明顺序的
+    /// 副产物。将来枚举增删或重排时，这一行顺序不该跟着动（`DataCategoryPresentationTests`
+    /// 把它钉在 PRD §5.1 的序列上）。
+    public static let displayOrder: [DataCategory] = [
+        .archivableSession,
+        .cacheAndLog,
+        .protected,
+        .uncertain,
+    ]
 }
