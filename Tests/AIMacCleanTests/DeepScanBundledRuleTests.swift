@@ -21,7 +21,6 @@ final class DeepScanBundledRuleTests: XCTestCase {
         defer { fixture.remove() }
 
         let rules = try admittedBundledRules()
-        let byID = Dictionary(rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         // MARK: Claude Code（`~/.claude`）
         try fixture.write(".claude/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 400)
