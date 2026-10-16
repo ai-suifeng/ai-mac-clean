@@ -98,6 +98,42 @@ final class ClassificationPrecedenceTests: XCTestCase {
         )
     }
 
+    /// 内置受保护清单是**最高档**：它是代码层强制的不变量，规则分类不能盖过它。
+    ///
+    /// 规则里的分类模式是「整条相对路径」，因此 `.credentials*`、`*.sqlite*` 这类单段模式
+    /// 表达不了嵌套路径；嵌套的凭证与状态库由代码层的内置保护清单兜住（PRD §8.3），
+    /// 深扫取类别时必须把这份清单的结果作为最高档传进来。
+    func test内置受保护清单是最高档_规则分类不能盖过它() throws {
+        let sessionID = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        let home = try makeHome()
+        let (_, report) = try loadBundledRules()
+
+        let nestedCredential = "file-history/\(sessionID)/.credentials.json"
+        let sqliteInTmp = ".tmp/state.sqlite"
+
+        for (ruleID, rootName, path) in [("claude-code", ".claude", nestedCredential),
+                                         ("codex-cli", ".codex", sqliteInTmp)] {
+            let toolRoot = home + "/" + rootName
+            XCTAssertTrue(
+                BuiltInProtectedPaths.isProtected(toolRoot + "/" + path,
+                                                  underToolRoot: toolRoot,
+                                                  homeDirectory: home),
+                "内置保护清单应覆盖嵌套路径 \(rootName)/\(path)。"
+            )
+            XCTAssertEqual(
+                report.category(forRelativePath: path, ruleID: ruleID, isBuiltInProtected: true),
+                .protected,
+                "内置保护清单命中的路径必须归到受保护，哪怕规则把它声明成了别的类别。"
+            )
+        }
+
+        // 规则层单独看时它们仍是别的类别：内置保护是**独立的一档**，这条差别要被钉住，
+        // 否则「受保护最高档」会退化成一句空话。
+        XCTAssertEqual(report.category(forRelativePath: nestedCredential, ruleID: "claude-code"),
+                       .archivableSession)
+        XCTAssertEqual(report.category(forRelativePath: sqliteInTmp, ruleID: "codex-cli"), .cacheAndLog)
+    }
+
     // MARK: - 未命中任何条目时的默认归属
 
     func test未命中任何分类条目时按不确定归属() {

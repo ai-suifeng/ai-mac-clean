@@ -207,12 +207,24 @@ public struct RuleAdmissionReport: Equatable, Sendable {
     /// 一条都没命中时按 `ClassificationResolution.unclassified`（不确定，仅展示占用）——
     /// 规则没声明过的数据不能因此被默认成可归档。
     ///
+    /// `isBuiltInProtected` 由调用方用 `BuiltInProtectedPaths` 判好传进来，它是最高的那一档：
+    /// 内置受保护清单是代码层强制的不变量（PRD §8.1、§8.3），规则分类不能盖过它。
+    /// 之所以由调用方传入而不是在这里现算，是因为这份清单的判定要列举规则声明的工具根
+    /// （符号链接真实目标），深扫应当**算一次、复用**，而不是每个文件都列举一遍。
+    ///
     /// 被拒绝的规则不在 `usableRules` 里，因此**永远不会**通过这条查询给出降级后的类别。
     ///
     /// 边界说明：完整的规则匹配语义属于发现器那一侧的工作（issue #12），
     /// 这里只提供一条够界面展示与验收断言使用的最小查询。
-    public func category(forRelativePath path: String, ruleID: String) -> DataCategory? {
+    public func category(
+        forRelativePath path: String,
+        ruleID: String,
+        isBuiltInProtected: Bool = false
+    ) -> DataCategory? {
         guard usableRule(id: ruleID) != nil else { return nil }
+
+        // 内置保护是最高的那一档：命中即受保护，规则把它声明成什么都不改变结论。
+        if isBuiltInProtected { return .protected }
 
         return ClassificationResolution.resolve(matches: matchingCategories(forRelativePath: path, ruleID: ruleID))
     }

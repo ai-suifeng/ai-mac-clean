@@ -156,6 +156,22 @@ JSON 还能直接进 `JSONDecoder`、输出确定（键排序），往返序列�
 判定顺序是引擎行为（`Sources/AIMacCleanRules/ClassificationResolution.swift`），
 规则文件不用、也无法改写它；调整条目顺序不会改变任何一条路径的归属。
 
+「受保护」这一档有两个来源，合起来才是 PRD §8.1 的下界：
+
+- 规则里的 `category: "protected"` 条目；
+- **代码层的内置受保护清单**（`BuiltInProtectedPaths`）。它的文件条目按**最后一段**判定，
+  因此 `.credentials.json`、`state.sqlite` 这类嵌套文件也受保护——规则模式是「整条相对路径」，
+  单段模式表达不了嵌套层级，这一段只能靠内置清单兜住（PRD §8.3）。
+
+深扫取类别时把内置清单判一次、作为最高档传进来：
+
+```swift
+report.category(forRelativePath: path, ruleID: id, isBuiltInProtected: isProtected)
+```
+
+传 `true` 时结论一定是 `protected`，规则把它声明成什么都不改变结论；这份判定要列举
+规则声明的工具根（符号链接真实目标），因此**算一次、复用**，不要每个文件都列举一遍。
+
 ### 分类模式相对哪个根（issue #25）
 
 `classification[].pattern` 相对**包含该路径的那个已声明根**匹配，因此一条模式可以同时
