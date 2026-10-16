@@ -411,6 +411,136 @@ final class BundledToolRuleTests: XCTestCase {
                       "Claude Code 的编码方案备注应当说明它不可无损逆解：\(note)")
     }
 
+    // MARK: Slice 7：照抄 PRD §14 实测形状的整棵树（issue #25 验收 2/3/4/5）
+
+    /// 一棵照抄实测形状的临时目录树，逐条路径钉住类别。
+    ///
+    /// 树里同时出现：新版 `~/.claude`（没有 `file-history/`、`todos/`）、
+    /// 旧版 `file-history/<会话UUID>/<hash>@vN` 与 `todos/<会话UUID>-agent-<会话UUID>.json`、
+    /// Codex 的 `.zst` + 明文两种扩展名、扁平 `archived_sessions/`、fork 双 UUID 文件名，
+    /// 以及只展示不碰的 `.tmp/**`。逐文件断言，顺带证明「缺失的路径不报错」。
+    func test照抄实测形状的树上每条路径都归到正确类别() throws {
+        let sessionID = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+        let agentID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+
+        let newClaude = try makeToolRoot("new-home/.claude", files: [
+            "projects/-Users-xiaowei-demo/\(sessionID).jsonl",
+            "projects/-Users-xiaowei-demo/agent-\(agentID).jsonl",
+            "plugins/cache/plugin.json",
+            "skills/my-skill/SKILL.md",
+            "settings.json",
+            "settings.local.json",
+            "mcp.json",
+            ".credentials.json",
+            "history.jsonl",
+            "shell-snapshots/snapshot-zsh-1700000000000-a1b2c3.sh",
+        ])
+
+        // 旧结构由 `~/.claudebak` 证实（PRD §14.5）。
+        let oldClaude = try makeToolRoot("old-home/.claude", files: [
+            "projects/-Users-xiaowei--claude/\(sessionID).jsonl",
+            "projects/-Users-xiaowei--claude/agent-\(agentID).jsonl",
+            "file-history/\(sessionID)/9f2c1b3a@v1",
+            "file-history/\(sessionID)/7c1d2e3f@v12",
+            "todos/\(sessionID)-agent-\(agentID).json",
+            "commands/review.md",
+            "agents/explorer.md",
+            "statsig/telemetry.json",
+        ])
+
+        let codex = try makeToolRoot("codex-home/.codex", files: [
+            "sessions/2025/10/01/rollout-2025-10-01t09-08-28-\(sessionID).jsonl.zst",
+            "sessions/2025/10/02/rollout-2025-10-02t11-22-33-\(sessionID).jsonl",
+            "sessions/2025/10/03/rollout-2025-10-03t12-00-00-\(sessionID)_\(agentID).jsonl.zst",
+            "archived_sessions/rollout-2025-09-30t08-00-00-\(sessionID).jsonl.zst",
+            "archived_sessions/rollout-2025-09-29t08-00-00-\(sessionID)_\(agentID).jsonl",
+            "config.toml",
+            "config.toml.bak",
+            "auth.json",
+            "prompts/review.md",
+            "state.sqlite",
+            "state.sqlite-wal",
+            "skills/my-skill/SKILL.md",
+            ".tmp/2025/10/01/rollout-2025-10-01t09-08-28-\(sessionID).jsonl",
+        ])
+
+        let (_, report) = try loadBundledRules()
+        XCTAssertEqual(report.rejections.map(\.description), [], "五份内置规则必须零拒绝。")
+
+        let cases: [(root: URL, ruleID: String, expected: [String: DataCategory])] = [
+            (newClaude, "claude-code", [
+                "projects/-Users-xiaowei-demo/\(sessionID).jsonl": .archivableSession,
+                "projects/-Users-xiaowei-demo/agent-\(agentID).jsonl": .archivableSession,
+                "plugins/cache/plugin.json": .protected,
+                "skills/my-skill/SKILL.md": .protected,
+                "settings.json": .protected,
+                "settings.local.json": .protected,
+                "mcp.json": .protected,
+                ".credentials.json": .protected,
+                "history.jsonl": .protected,
+                "shell-snapshots/snapshot-zsh-1700000000000-a1b2c3.sh": .protected,
+            ]),
+            (oldClaude, "claude-code", [
+                "projects/-Users-xiaowei--claude/\(sessionID).jsonl": .archivableSession,
+                "projects/-Users-xiaowei--claude/agent-\(agentID).jsonl": .archivableSession,
+                "file-history/\(sessionID)/9f2c1b3a@v1": .archivableSession,
+                "file-history/\(sessionID)/7c1d2e3f@v12": .archivableSession,
+                "todos/\(sessionID)-agent-\(agentID).json": .archivableSession,
+                "commands/review.md": .protected,
+                "agents/explorer.md": .protected,
+                "statsig/telemetry.json": .protected,
+            ]),
+            (codex, "codex-cli", [
+                "sessions/2025/10/01/rollout-2025-10-01t09-08-28-\(sessionID).jsonl.zst": .archivableSession,
+                "sessions/2025/10/02/rollout-2025-10-02t11-22-33-\(sessionID).jsonl": .archivableSession,
+                "sessions/2025/10/03/rollout-2025-10-03t12-00-00-\(sessionID)_\(agentID).jsonl.zst": .archivableSession,
+                "archived_sessions/rollout-2025-09-30t08-00-00-\(sessionID).jsonl.zst": .archivableSession,
+                "archived_sessions/rollout-2025-09-29t08-00-00-\(sessionID)_\(agentID).jsonl": .archivableSession,
+                "config.toml": .protected,
+                "config.toml.bak": .protected,
+                "auth.json": .protected,
+                "prompts/review.md": .protected,
+                "state.sqlite": .protected,
+                "state.sqlite-wal": .protected,
+                "skills/my-skill/SKILL.md": .protected,
+                ".tmp/2025/10/01/rollout-2025-10-01t09-08-28-\(sessionID).jsonl": .cacheAndLog,
+            ]),
+        ]
+
+        for sample in cases {
+            let files = try relativeFiles(under: sample.root)
+
+            // 树里出现的每条路径都要有明确期望，避免「没断言到」被当成通过。
+            XCTAssertEqual(Set(files), Set(sample.expected.keys),
+                           "\(sample.ruleID) 的临时树与期望集合不一致。")
+
+            for path in files {
+                XCTAssertEqual(report.category(forRelativePath: path, ruleID: sample.ruleID),
+                               sample.expected[path],
+                               "\(sample.ruleID) 应把 \(path) 判为 \(String(describing: sample.expected[path]))。")
+            }
+        }
+
+        // 新版 `~/.claude` 里 `file-history/`、`todos/` 不存在：树里没有它们，全程不报错。
+        XCTAssertFalse(try relativeFiles(under: newClaude).contains {
+            $0.hasPrefix("file-history/") || $0.hasPrefix("todos/")
+        })
+    }
+
+    /// 兜底通配 `**` 会把受保护区一起吞掉，规则里一条都不许有（issue #25 验收）。
+    func test内置规则的分类声明没有兜底通配() throws {
+        let (rules, _) = try loadBundledRules()
+
+        for rule in rules {
+            for entry in rule.classification {
+                XCTAssertNotEqual(entry.pattern.canonicalString, "**",
+                                  "规则 \(rule.id) 用了兜底通配分类，会吞掉受保护区。")
+                XCTAssertFalse(entry.pattern.canonicalString.hasPrefix("**"),
+                               "规则 \(rule.id) 的分类模式以兜底通配开头：\(entry.pattern.canonicalString)")
+            }
+        }
+    }
+
     // MARK: Slice 6：Cursor / DeepSeek Harness 格式可表达，OpenCode 只做发现
 
     func testCursor的主转录与子代理转录跨文件级联() throws {
