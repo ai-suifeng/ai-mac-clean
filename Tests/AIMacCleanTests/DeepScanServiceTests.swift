@@ -278,4 +278,95 @@ final class DeepScanServiceTests: XCTestCase {
             ["claude-code"]
         )
     }
+
+    // MARK: - 概览页的运行级问题通道（ticket #32）
+
+    /// 记录「有没有被叫去扫」。取问题的路上**一次扫描都不许发生**。
+    private final class ScanCountingScanner: DeepScanning {
+
+        private(set) var scanCount = 0
+
+        func scan(tools: [ConfirmedTool], rules: RuleAdmissionReport, homeDirectory: String) -> DeepScanReport {
+            scanCount += 1
+            return DeepScanReport(toolReports: [])
+        }
+
+        func scan(tools: [ConfirmedTool], rules: [ToolRule], homeDirectory: String) -> DeepScanReport {
+            scanCount += 1
+            return DeepScanReport(toolReports: [])
+        }
+    }
+
+    private func emptyStore(
+        named name: String
+    ) throws -> (store: JSONConfirmationStore, fixture: TemporaryDirectoryFixture) {
+        let directory = try TemporaryDirectoryFixture(named: name)
+        return (JSONConfirmationStore(applicationSupportRoot: directory.url), directory)
+    }
+
+    /// 规则资源没打进包时，概览页要能拿到「没有加载到规则」这条事实——**而不必先扫一遍**。
+    ///
+    /// `run()` 在规则可用时会跑一次完整深扫：只为了拿问题而调它，等于每次打开概览页
+    /// 都把这棵 31G / 数万文件的树扫两遍（概览页要的是报告，报告走 `scan(_:)`）。
+    func test规则目录缺失时只取问题不扫盘() throws {
+        let fixture = try DeepScanFixture(named: "deep-scan-service-issues-no-rules")
+        defer { fixture.remove() }
+        let (store, storeDirectory) = try emptyStore(named: "deep-scan-service-issues-no-rules-store")
+        defer { storeDirectory.remove() }
+
+        let scanner = ScanCountingScanner()
+        let service = DeepScanService(
+            configuration: .init(homeDirectory: fixture.rootPath, ruleDirectory: nil),
+            store: store,
+            scanner: scanner
+        )
+
+        XCTAssertEqual(service.issues(), [.noRulesLoaded])
+        XCTAssertEqual(scanner.scanCount, 0, "问问题不该扫盘：扫描是另一条入口（scan(_:)）的事")
+    }
+
+    /// 规则读到了、但一条都没过准入：给的是「几条被拒」，与「一条都没读到」分开。
+    func test规则全部被拒时只取问题并给出被拒条数() throws {
+        let fixture = try DeepScanFixture(named: "deep-scan-service-issues-rejected")
+        defer { fixture.remove() }
+        let (store, storeDirectory) = try emptyStore(named: "deep-scan-service-issues-rejected-store")
+        defer { storeDirectory.remove() }
+
+        let ruleDirectory = try fixture.makeDirectory("rules")
+        try Data(RuleFixtures.downgradedClaudeCodeJSON.utf8)
+            .write(to: ruleDirectory.appendingPathComponent("claude-code.json"))
+        try fixture.write(".claude/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 400)
+
+        let scanner = ScanCountingScanner()
+        let service = DeepScanService(
+            configuration: .init(homeDirectory: fixture.rootPath, ruleDirectory: ruleDirectory),
+            store: store,
+            scanner: scanner
+        )
+
+        XCTAssertEqual(service.issues(), [.noUsableRules(rejectedCount: 1)])
+        XCTAssertEqual(scanner.scanCount, 0, "没有可用规则时更没有理由扫盘")
+
+        // 报告入口照常工作：摆不摆数字由运行级问题决定，不由报告空不空决定。
+        _ = service.scan([record(id: "claude-code", root: fixture.rootPath + "/.claude")])
+        XCTAssertEqual(scanner.scanCount, 1, "scan(_:) 仍是一条独立的入口")
+    }
+
+    /// 规则可用时问题列表为空——「没有问题」与「没问到」必须分得开。
+    func test规则可用时只取问题为空且不扫盘() throws {
+        let fixture = try DeepScanFixture(named: "deep-scan-service-issues-ok")
+        defer { fixture.remove() }
+        let (store, storeDirectory) = try emptyStore(named: "deep-scan-service-issues-ok-store")
+        defer { storeDirectory.remove() }
+
+        let scanner = ScanCountingScanner()
+        let service = DeepScanService(
+            configuration: .init(homeDirectory: fixture.rootPath, ruleDirectory: BuiltInRuleResources.directory),
+            store: store,
+            scanner: scanner
+        )
+
+        XCTAssertEqual(service.issues(), [], "内置规则可用：概览页照常展示占用")
+        XCTAssertEqual(scanner.scanCount, 0)
+    }
 }

@@ -44,7 +44,25 @@ extension DeepScanIssue: CustomStringConvertible {
 /// 单独成协议的理由与浅扫一样：**界面状态机不该自己去读规则文件与确认存储**。
 /// 视图模型的测试注入一个固定结果，生产接线由 `DeepScanService` 提供。
 public protocol DeepScanSource {
+
+    /// 跑一次深扫，并带着「做不成的那部分」回来。
     func run() -> DeepScanRun
+
+    /// **只报告这次运行的运行级问题，不扫盘**（ticket #32）。
+    ///
+    /// 概览页要的是「规则资源配上没有」这条事实，而不是一份报告——它的报告来自
+    /// `ConfirmedToolScanning.scan(_:)`。为了这条事实调 `run()` 会把整棵工具树扫一遍
+    /// （规则可用时 `run()` 就是一次完整深扫），概览页每次出现都付两遍扫描的代价。
+    func issues() -> [DeepScanIssue]
+}
+
+extension DeepScanSource {
+
+    /// 兜底实现：跑一次 `run()`，取它的问题。
+    ///
+    /// 只对「问一次问题顺带扫一遍无所谓」的实现合适（测试替身）。
+    /// 生产接线 `DeepScanService` 覆写了它：只加载规则、不扫盘。
+    public func issues() -> [DeepScanIssue] { run().issues }
 }
 
 /// 「把已确认的工具深扫成一份占用报告」这件事的入口（issue #28）。
@@ -188,6 +206,15 @@ public struct DeepScanService: DeepScanSource, ConfirmedToolScanning {
     /// 对这批**已确认**的记录做深扫（概览页只取报告，规则不可用时也照常给结果）。
     public func scan(_ records: [ConfirmationRecord]) -> DeepScanReport {
         scan(tools: confirmedTools(from: records), rules: admittedRules)
+    }
+
+    /// 运行级问题（ticket #32）：规则没加载到 / 一条都没过准入。
+    ///
+    /// **不扫盘**：只走规则加载与准入这一小段（4 个规则文件），概览页因此可以在每次
+    /// 出现时先问一次「这次能不能扫」，而不是先付一次 31G 的递归扫描。
+    /// 判断本身与 `run()` 共用 `loadUsableRules()`，两个入口说不出互相矛盾的话。
+    public func issues() -> [DeepScanIssue] {
+        loadUsableRules().issues
     }
 
     /// 本实例的已准入规则集。

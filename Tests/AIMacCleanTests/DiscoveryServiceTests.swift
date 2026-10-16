@@ -250,12 +250,8 @@ final class DiscoveryServiceTests: XCTestCase {
     // MARK: - 辅助
 
     /// 一条试图把内置受保护条目（`settings*.json`）降级为可归档的规则。
-    private var downgradedClaudeCodeJSON: String {
-        RuleFixtures.claudeCodeJSON.replacingOccurrences(
-            of: #"{ "pattern": "settings*.json", "category": "protected" }"#,
-            with: #"{ "pattern": "settings*.json", "category": "archivableSession" }"#
-        )
-    }
+    /// 形状集中在 `RuleFixtures`：深扫侧的同类用例用的是同一条。
+    private var downgradedClaudeCodeJSON: String { RuleFixtures.downgradedClaudeCodeJSON }
 
     private func writeRules(_ ruleJSON: [String]) throws -> URL {
         let directory = try home.home.makeDirectory("rules-\(UUID().uuidString)")
