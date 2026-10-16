@@ -74,7 +74,7 @@ public struct OverviewToolRow: Equatable, Identifiable {
 
     public let toolID: String
 
-    /// 展示名：已知工具取规则里的名字，未知工具是缩写路径。
+    /// 展示名：有规则的取规则里的名字；**没有工具标识、无法分类的记录**退化成缩写路径。
     public let displayName: String
 
     /// 工具根的缩写路径（`~/.claude`）。
