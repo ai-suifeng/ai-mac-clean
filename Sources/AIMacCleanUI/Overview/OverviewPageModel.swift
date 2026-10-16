@@ -1,0 +1,279 @@
+import Combine
+import Foundation
+
+import AIMacCleanDomain
+
+/// 概览页的视图模型（issue #28；PRD §9、§14.1）。
+///
+/// 页面里所有会出错或需要判断的状态都在这里：扫描中、空状态、占比极小的标注、
+/// 容量未知、归档按钮为什么不可用。视图只做渲染与转发，因此这一层可以在没有窗口的情况下测。
+///
+/// ## 诚实展示的四条纪律
+///
+/// 1. **只有已确认的工具进统计**（PRD §4.1 第 4 步）：输入是 `ConfirmationStore.confirmedTools`，
+///    候选列表里的东西一个都不会被算进来。
+/// 2. **不显示本阶段拿不出来的数字**：没有压缩节省、没有「搬迁腾出」（属 M3，PRD §6.3/§9）；
+///    容量读不到时显示「未知」，绝不显示 0（0 会被读成「盘满了」）。
+/// 3. **收益低就如实说**：可归档占比极小的工具带上「可归档占比极小」，不用大字号暗示收益
+///    （PRD §9；§14.1 的 Claude Code 是 0.15%）。
+/// 4. **空状态给路**：没有任何已确认工具时引导去「发现与确认」页，而不是摆一排误导性的 0。
+public final class OverviewPageModel: ObservableObject {
+
+    /// 界面读的那一份状态。
+    @Published public private(set) var state: OverviewPageState
+
+    private let store: ConfirmationStore
+    private let scanner: any ConfirmedToolScanning
+    private let capacityReader: any VolumeCapacityReading
+    private let homeDirectory: String
+
+    /// 「扫描」与「更新状态」分别跑在哪条线程上（复用 issue #21 的调度点）。
+    private let scheduler: DiscoveryScheduler
+
+    /// - Parameters:
+    ///   - store: 确认存储。只读 `confirmedTools`——候选不参与概览。
+    ///   - scanner: 深扫入口（生产用 `DeepScanService`，测试给固定报告）。
+    ///   - capacityReader: 卷容量读数（生产用 `SystemVolumeCapacityReader`，测试给固定值）。
+    ///   - homeDirectory: 路径缩写用；也是容量读数的那个卷（数据就放在主目录下）。
+    ///   - scheduler: 扫描跑在哪条线程上。默认同步（测试确定），生产用 `.background()`。
+    public init(
+        store: ConfirmationStore,
+        scanner: any ConfirmedToolScanning,
+        capacityReader: any VolumeCapacityReading,
+        homeDirectory: String,
+        scheduler: DiscoveryScheduler = .immediate
+    ) {
+        self.store = store
+        self.scanner = scanner
+        self.capacityReader = capacityReader
+        self.homeDirectory = homeDirectory
+        self.scheduler = scheduler
+        self.state = OverviewPageState()
+    }
+
+    /// 应用启动时用的入口：本机确认存储 + 内置规则深扫 + 系统卷容量读数。
+    ///
+    /// - Parameter scanner: 省略时按 `homeDirectory` 建一个标准的 `DeepScanService`。
+    public static func standard(
+        store: ConfirmationStore = JSONConfirmationStore.standard(),
+        scanner: (any ConfirmedToolScanning)? = nil,
+        capacityReader: any VolumeCapacityReading = SystemVolumeCapacityReader(),
+        homeDirectory: String = NSHomeDirectory()
+    ) -> OverviewPageModel {
+        OverviewPageModel(
+            store: store,
+            scanner: scanner ?? DeepScanService.standard(homeDirectory: homeDirectory),
+            capacityReader: capacityReader,
+            homeDirectory: homeDirectory,
+            // 生产：深扫本机实测约 31G / 数万文件，跑在后台，界面不被冻住（issue #21）。
+            scheduler: .background()
+        )
+    }
+
+    // MARK: - 生命周期
+
+    /// 跑一次深扫并铺开状态。视图出现时调用；重复调用等价于重新扫描。
+    ///
+    /// **扫描不在调用线程上跑**（issue #21）。扫描期间**不清空已有结果**：
+    /// 上一轮的数字原样留在界面上，用户点「重新扫描」不会看到页面先空一下（验收 6）。
+    /// 扫描进行中重复调用直接忽略，不排队第二次扫描。
+    public func load() {
+        guard !state.isScanning else { return }
+
+        // 只扫已确认的工具，且这一轮要扫的就是这一刻的记录。
+        let records = store.confirmedTools
+        state.isScanning = true
+        state.confirmedToolCount = records.count
+
+        scheduler.runScan { [weak self] in
+            guard let self else { return }
+            let report = self.scanner.scan(records)
+            // 容量与深扫在同一段后台工作里读：界面线程上只剩「换状态」。
+            let capacity = self.capacityReader.capacity(ofVolumeContaining: self.homeDirectory)
+            self.scheduler.runOnMain { [weak self] in
+                guard let self else { return }
+                self.state.report = report
+                self.state.capacity = capacity
+                self.state.hasLoaded = true
+                self.state.isScanning = false
+            }
+        }
+    }
+
+    /// 「重新扫描」按钮。
+    public func reload() {
+        load()
+    }
+
+    // MARK: - 空状态（验收 5）
+
+    /// 是否该显示空状态：**第一轮扫描完成之后**且没有任何已确认工具。
+    public var isEmpty: Bool {
+        state.hasLoaded && state.confirmedToolCount == 0
+    }
+
+    /// 空状态的引导文案：告诉用户去哪儿确认工具，而不是摆一排 0。
+    public var emptyGuidanceText: String? {
+        isEmpty ? L10n.text(.overviewEmptyNoTools) : nil
+    }
+
+    /// 固定文案。
+    public var pageTitle: String { L10n.text(.overviewPageTitle) }
+    public var stageNoteText: String { L10n.text(.overviewStageNote) }
+    public var reloadTitle: String { L10n.text(.overviewReload) }
+    public var categorySectionTitle: String { L10n.text(.overviewSectionCategories) }
+    public var toolSectionTitle: String { L10n.text(.overviewSectionTools) }
+    public var scanningText: String? { state.isScanning ? L10n.text(.overviewScanning) : nil }
+
+    // MARK: - 数字（验收 1、2）
+
+    /// 总占用文案；还没有结果或空状态时为 `nil`（宁可什么都不显示，也不显示 0）。
+    public var totalText: String? {
+        guard let report = visibleReport else { return nil }
+        return L10n.format(.overviewTotalValue, [
+            ByteSizeDisplay.string(from: report.totalBytes),
+            Self.countText(report.totalFileCount),
+        ])
+    }
+
+    /// 总占用的辅助功能文案（辅助技术也要读得出数字，验收 7）。
+    public var totalAccessibilityText: String? {
+        guard let report = visibleReport else { return nil }
+        return L10n.format(.overviewAccessibilityTotal, [
+            ByteSizeDisplay.string(from: report.totalBytes),
+            Self.countText(report.totalFileCount),
+        ])
+    }
+
+    /// 「可归档占比」文案：占比 + 可归档字节。
+    public var archivableShareText: String? {
+        guard let report = visibleReport else { return nil }
+        return L10n.format(.overviewArchivableValue, [
+            ShareText.string(fromShare: report.archivableShare),
+            ByteSizeDisplay.string(from: report.archivableOccupancy.bytes),
+        ])
+    }
+
+    /// 四类分列（全体工具逐类求和）。
+    public var categoryRows: [OverviewCategoryRow] {
+        visibleReport?.categoryLines.map(Self.categoryRow) ?? []
+    }
+
+    /// 各工具占用，**按体积从大到小**排列（同样大小按工具标识，保证顺序稳定）。
+    public var toolRows: [OverviewToolRow] {
+        guard let report = visibleReport else { return [] }
+        return report.toolReports
+            .sorted { lhs, rhs in
+                if lhs.occupancy.bytes != rhs.occupancy.bytes { return lhs.occupancy.bytes > rhs.occupancy.bytes }
+                return lhs.toolID < rhs.toolID
+            }
+            .map { Self.toolRow($0, homeDirectory: homeDirectory) }
+    }
+
+    // MARK: - 磁盘剩余空间（验收 7）
+
+    /// 磁盘剩余空间文案；还没读过容量时为 `nil`。
+    ///
+    /// 读到容量就给数字（**真的 0 也照常显示**——盘确实满了是事实）；
+    /// 读不到就按原因给「未知」的说明，绝不回落到 0。
+    public var freeSpaceText: String? {
+        guard let capacity = state.capacity else { return nil }
+        switch capacity {
+        case let .measured(availableBytes, totalBytes):
+            return L10n.format(.overviewDiskFree, [
+                ByteSizeDisplay.string(from: availableBytes),
+                ByteSizeDisplay.string(from: totalBytes),
+            ])
+        case .unknown(.volumeUnreadable):
+            return L10n.text(.overviewDiskUnknownUnreadable)
+        case .unknown(.capacityNotReported):
+            return L10n.text(.overviewDiskUnknownNotReported)
+        }
+    }
+
+    // MARK: - 主按钮（验收 4）
+
+    /// 「开始归档」。
+    public var archiveButtonTitle: String { L10n.text(.overviewArchiveAction) }
+
+    /// 主按钮**恒不可用**：归档能力属于 M3。
+    ///
+    /// 刻意不由「有没有可归档数据」推导：即使有数据，能力也还不存在。
+    /// 界面因此必须给出原因（`archiveDisabledReason`），而不是给一个点了没反应的按钮。
+    public var archiveButtonIsEnabled: Bool { false }
+
+    /// 主按钮为什么不可用（逐字解释，不是一句「暂不可用」）。
+    public var archiveDisabledReason: String { L10n.text(.overviewArchiveDisabledReason) }
+
+    // MARK: - 内部
+
+    /// 空状态下一律不给数字：`report` 里可能还留着上一轮的结果（例如用户刚移出全部工具）。
+    private var visibleReport: DeepScanReport? {
+        isEmpty ? nil : state.report
+    }
+
+    private static func categoryRow(_ line: CategoryOccupancyLine) -> OverviewCategoryRow {
+        let occupancyText = occupancyText(line.occupancy)
+        return OverviewCategoryRow(
+            categoryID: line.categoryID,
+            title: line.displayName,
+            handling: line.handling,
+            occupancyText: occupancyText,
+            bytes: line.occupancy.bytes,
+            fileCount: line.occupancy.fileCount,
+            accessibilityLabel: L10n.format(.overviewAccessibilityCategory, [
+                line.displayName,
+                occupancyText,
+                line.handling,
+            ])
+        )
+    }
+
+    private static func toolRow(_ report: ToolScanReport, homeDirectory: String) -> OverviewToolRow {
+        let occupancyText = occupancyText(report.occupancy)
+        let displayPath = ToolRootDisplay.abbreviated(report.toolRootPath, homeDirectory: homeDirectory)
+        let share = ShareText.string(fromShare: report.archivableShare)
+        let archivableSize = ByteSizeDisplay.string(from: report.archivableOccupancy.bytes)
+        let negligible = report.isArchivableShareNegligible ? L10n.text(.overviewToolNegligible) : nil
+        let displayOnly = report.displayOnlyOccupancy.bytes > 0
+            ? L10n.format(.overviewToolDisplayOnly, [ByteSizeDisplay.string(from: report.displayOnlyOccupancy.bytes)])
+            : nil
+
+        // 辅助功能读出同一批事实：名字、路径、占用、可归档、占比，外加两句如实的补充。
+        var accessibilityLabel = L10n.format(.overviewAccessibilityTool, [
+            report.displayName,
+            displayPath,
+            occupancyText,
+            archivableSize,
+            share,
+        ])
+        for extra in [negligible, displayOnly].compactMap({ $0 }) {
+            accessibilityLabel += "；" + extra
+        }
+
+        return OverviewToolRow(
+            toolID: report.toolID,
+            displayName: report.displayName,
+            displayPath: displayPath,
+            occupancyText: occupancyText,
+            bytes: report.occupancy.bytes,
+            fileCount: report.occupancy.fileCount,
+            archivableText: L10n.format(.overviewToolArchivable, [archivableSize, share]),
+            negligibleAnnotation: negligible,
+            displayOnlyText: displayOnly,
+            categoryRows: report.categoryLines.map(categoryRow),
+            accessibilityLabel: accessibilityLabel
+        )
+    }
+
+    /// 「1 MB（2 个文件）」。
+    private static func occupancyText(_ occupancy: Occupancy) -> String {
+        L10n.format(.overviewOccupancyValue, [
+            ByteSizeDisplay.string(from: occupancy.bytes),
+            countText(occupancy.fileCount),
+        ])
+    }
+
+    /// 文件数与 `ByteSizeFormatter` 同一套纪律：**不带千分位分隔符**，任何系统语言下写法一致。
+    private static func countText(_ count: Int) -> String { "\(count)" }
+}

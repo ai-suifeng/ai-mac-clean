@@ -12,7 +12,7 @@
 "sidebar.section.archived" = "已归档";
 "sidebar.section.settings" = "设置";
 
-"sidebar.accessibility.overview" = "概览：总占用与可归档预计释放空间";
+"sidebar.accessibility.overview" = "概览：总占用、各工具占用、四类分列与磁盘剩余空间";
 "sidebar.accessibility.discovery" = "发现与确认：候选列表与置信度标识";
 "sidebar.accessibility.archive" = "归档：范围选择、预览与结果汇总";
 "sidebar.accessibility.archived" = "已归档：浏览、搜索与还原";
@@ -72,3 +72,26 @@
 "discovery.issue.hintsUnavailable" = "关键词 / 负向名单词表这次没读到：%@。没有词表时仍可发现候选，但旧快照与伴生小工具不会被降权。";
 "discovery.issue.storeUnreadable" = "确认记录无法读取：%@。为避免覆盖你已有的判断，本次改动没有保存。";
 "discovery.issue.actionFailed" = "操作没有保存成功：%@";
+
+/* MARK: - 概览页（issue #28；PRD §9、§14.1） */
+"overview.page.title" = "概览";
+"overview.stage.note" = "当前阶段只读：不写入、不移动、不删除任何文件。归档能力属于下一个里程碑。";
+"overview.status.scanning" = "正在后台扫描…（上一轮结果保留，界面照常可用）";
+"overview.action.reload" = "重新扫描";
+"overview.empty.noTools" = "还没有确认任何工具。先到「发现与确认」页确认你的 AI 工具，这里才会有可统计的占用。";
+"overview.total.value" = "总占用：%1$@（%2$@ 个文件）";
+"overview.archivable.value" = "可归档占比：%1$@（%2$@）";
+"overview.section.categories" = "按类别分列（四类）";
+"overview.section.tools" = "各工具占用";
+"overview.occupancy.value" = "%1$@（%2$@ 个文件）";
+"overview.tool.archivable" = "可归档 %1$@（%2$@）";
+"overview.tool.negligible" = "可归档占比极小";
+"overview.tool.displayOnly" = "其中仅展示（不参与归档）：%@";
+"overview.disk.free" = "磁盘剩余空间：%1$@（共 %2$@）";
+"overview.disk.unknown.unreadable" = "磁盘剩余空间未知：读不到这个卷，这里不显示数字。";
+"overview.disk.unknown.notReported" = "磁盘剩余空间未知：系统没有报告这个卷的容量，这里不显示数字。";
+"overview.action.archive" = "开始归档";
+"overview.archive.disabledReason" = "归档能力还没落地（属于下一个里程碑）。本阶段只读取元数据，不会写入、移动或删除任何文件。";
+"overview.accessibility.total" = "总占用 %1$@，共 %2$@ 个文件";
+"overview.accessibility.category" = "%1$@：%2$@，%3$@";
+"overview.accessibility.tool" = "%1$@，路径 %2$@，占用 %3$@，可归档 %4$@，占 %5$@";;

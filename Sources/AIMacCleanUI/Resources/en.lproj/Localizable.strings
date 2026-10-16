@@ -9,7 +9,7 @@
 "sidebar.section.archived" = "Archived";
 "sidebar.section.settings" = "Settings";
 
-"sidebar.accessibility.overview" = "Overview: total usage and estimated space that archiving would free";
+"sidebar.accessibility.overview" = "Overview: total occupancy, occupancy per tool, the four categories and free disk space";
 "sidebar.accessibility.discovery" = "Discover & Confirm: candidate list with confidence labels";
 "sidebar.accessibility.archive" = "Archive: scope selection, preview and results";
 "sidebar.accessibility.archived" = "Archived: browse, search and restore";
@@ -69,3 +69,26 @@
 "discovery.issue.hintsUnavailable" = "The keyword / negative-name list could not be read: %@. Candidates are still discovered, but old snapshots and companion tools will not be demoted.";
 "discovery.issue.storeUnreadable" = "The confirmation records could not be read: %@. To avoid overwriting your existing decisions, nothing was saved this time.";
 "discovery.issue.actionFailed" = "The action was not saved: %@";
+
+/* Overview (issue #28; PRD §9, §14.1) */
+"overview.page.title" = "Overview";
+"overview.stage.note" = "This milestone is read-only: nothing is written, moved or deleted. Archiving arrives in the next milestone.";
+"overview.status.scanning" = "Scanning in the background… (the previous results stay on screen and the window stays usable)";
+"overview.action.reload" = "Scan Again";
+"overview.empty.noTools" = "No tools confirmed yet. Confirm your AI tools on the Discover & Confirm page first — only then can this page show occupancy.";
+"overview.total.value" = "Total occupancy: %1$@ (%2$@ files)";
+"overview.archivable.value" = "Archivable share: %1$@ (%2$@)";
+"overview.section.categories" = "By category (four)";
+"overview.section.tools" = "Occupancy per tool";
+"overview.occupancy.value" = "%1$@ (%2$@ files)";
+"overview.tool.archivable" = "Archivable %1$@ (%2$@)";
+"overview.tool.negligible" = "Archivable share is tiny";
+"overview.tool.displayOnly" = "Of which display-only (never archived): %@";
+"overview.disk.free" = "Free disk space: %1$@ (of %2$@)";
+"overview.disk.unknown.unreadable" = "Free disk space unknown: this volume cannot be read, so no number is shown here.";
+"overview.disk.unknown.notReported" = "Free disk space unknown: the system did not report this volume's capacity, so no number is shown here.";
+"overview.action.archive" = "Start Archiving";
+"overview.archive.disabledReason" = "Archiving is not implemented yet (it belongs to the next milestone). This milestone only reads metadata and never writes, moves or deletes any file.";
+"overview.accessibility.total" = "Total occupancy %1$@, %2$@ files";
+"overview.accessibility.category" = "%1$@: %2$@, %3$@";
+"overview.accessibility.tool" = "%1$@, path %2$@, occupancy %3$@, archivable %4$@, share %5$@";;
