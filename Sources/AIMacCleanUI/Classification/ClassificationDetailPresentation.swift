@@ -21,10 +21,6 @@ import AIMacCleanDomain
 /// 5. **不做任何压缩率估算**：那是 M3 的事（§9、§6.3）。
 public enum ClassificationDetailPresenter {
 
-    /// 「可归档占比极小」的判定阈值：低于 1% 就标注（PRD §9 只给了「极小」这个定性，
-    /// 这里取本票验收里写明的 1% 作为展示用的分界）。
-    public static let tinyArchivableShareThreshold = 0.01
-
     /// 每个类别最多列几条子路径明细：界面是给人看的，不是 `du` 的输出。
     public static let maxSummariesPerCategory = 5
 
@@ -55,8 +51,17 @@ public enum ClassificationDetailPresenter {
         // 可归档占比：这是 PRD §9 要求如实给出的那个数（§14.1 的 Claude Code 只有 0.14%）。
         // 占比极小时给一句标注——但**不**用大字号、**不**换算成「能腾出多少」，
         // 更不出现任何压缩率估算（那是 M3）。
-        let archivableShare = share(of: report.archivableOccupancy.bytes, totalBytes: totalBytes)
-        let isTinyShare = totalBytes > 0 && archivableShare < tinyArchivableShareThreshold
+        //
+        // 门槛、判定与百分比都只有一处：`ArchivableShare`（概览页消费同一个类型）。
+        // 「极小」要求**确实有可归档字节**：0 不叫「极小」，叫「没有」。
+        let archivableShare = ArchivableShare.share(
+            of: report.archivableOccupancy.bytes,
+            totalBytes: totalBytes
+        )
+        let isTinyShare = ArchivableShare.isNegligible(
+            archivableBytes: report.archivableOccupancy.bytes,
+            totalBytes: totalBytes
+        )
 
         return ToolClassificationDetail(
             toolID: report.toolID,
@@ -67,7 +72,7 @@ public enum ClassificationDetailPresenter {
             categoryRows: rows,
             rootRows: report.roots.map { rootRow(for: $0, homeDirectory: homeDirectory, language: language) },
             unreadableRows: report.unreadable.map { unreadableRow(for: $0, language: language) },
-            archivableShareText: percentText(archivableShare),
+            archivableShareText: ArchivableShare.percentText(archivableShare),
             isArchivableShareTiny: isTinyShare,
             tinyArchivableShareNotice: isTinyShare
                 ? L10n.text(.classificationArchivableShareTiny, language: language)
@@ -79,7 +84,7 @@ public enum ClassificationDetailPresenter {
             ),
             accessibilityValue: L10n.format(
                 .classificationToolAccessibilityValue,
-                [report.occupancy.sizeText, percentText(archivableShare)],
+                [report.occupancy.sizeText, ArchivableShare.percentText(archivableShare)],
                 language: language
             )
         )
@@ -157,7 +162,9 @@ public enum ClassificationDetailPresenter {
         let name = nameText(for: occupancy.category, language: language)
         let handling = handlingText(for: occupancy.category, language: language)
         let sizeText = occupancy.occupancy.sizeText
-        let shareText = percentText(share(of: occupancy.occupancy.bytes, totalBytes: totalBytes))
+        let shareText = ArchivableShare.percentText(
+            ArchivableShare.share(of: occupancy.occupancy.bytes, totalBytes: totalBytes)
+        )
         return ClassificationCategoryRow(
             category: occupancy.category,
             nameText: name,
@@ -252,30 +259,6 @@ public enum ClassificationDetailPresenter {
         L10n.format(.classificationFileCount, ["\(fileCount)"], language: language)
     }
 
-    /// 占比：按本工具总占用算，总占用为 0 时按 0（不返回 NaN，也不显示 `-`）。
-    public static func share(of bytes: Int64, totalBytes: Int64) -> Double {
-        guard totalBytes > 0 else { return 0 }
-        return Double(bytes) / Double(totalBytes)
-    }
-
-    /// 占比的展示文案：最多两位小数，去掉多余的零（`97.5%`、`0.14%`、`2%`、`0%`）。
-    ///
-    /// 手工格式化而不用 `NumberFormatter`：后者的输出跟系统语言走（千分位、小数点符号），
-    /// 而同一个数字在任何系统下都必须长得一样（与 `ByteSizeFormatter` 同一条纪律）。
-    ///
-    /// 非零但小于 0.005% 的占比显示成 `<0.01%` 而不是 `0%`——「有，但极小」
-    /// 与「一点都没有」是两件事（PRD §9 的诚实展示）。
-    public static func percentText(_ share: Double) -> String {
-        guard share > 0 else { return "0%" }
-        let basisPoints = Int((share * 10_000).rounded())
-        guard basisPoints > 0 else { return "<0.01%" }
-
-        let whole = basisPoints / 100
-        let fraction = basisPoints % 100
-        if fraction == 0 { return "\(whole)%" }
-        if fraction % 10 == 0 { return "\(whole).\(fraction / 10)%" }
-        return "\(whole).\(String(format: "%02d", fraction))%"
-    }
 
 }
 

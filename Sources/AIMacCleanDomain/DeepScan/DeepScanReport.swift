@@ -346,10 +346,9 @@ public struct DeepScanReport: Equatable, Sendable {
         Occupancy.sum(toolReports.map(\.archivableOccupancy))
     }
 
-    /// 可归档字节占比（总字节为 0 时返回 0）。
+    /// 可归档字节占比（总字节为 0 时返回 0）。算法只有一处：`ArchivableShare`。
     public var archivableShare: Double {
-        guard totalOccupancy.bytes > 0 else { return 0 }
-        return Double(archivableOccupancy.bytes) / Double(totalOccupancy.bytes)
+        ArchivableShare.share(of: archivableOccupancy.bytes, totalBytes: totalOccupancy.bytes)
     }
 
     /// 按工具标识取一份报告。

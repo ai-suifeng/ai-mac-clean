@@ -50,26 +50,19 @@ extension ToolScanReport {
     }
 
     /// 本工具「可归档占比」= 可归档字节 / 本工具总占用（总占用为 0 时返回 0）。
-    public var archivableShare: Double {
-        guard occupancy.bytes > 0 else { return 0 }
-        return Double(archivableOccupancy.bytes) / Double(occupancy.bytes)
-    }
-
-    /// 「可归档占比极小」的判定门槛。
     ///
-    /// **文档没有给阈值**（PRD §9 只说「收益极低的工具如实标注」，§14.1 只举了
-    /// Claude Code 0.15% 这一个数），这里取保守的一侧：1%。
-    /// 依据是实测分布的两端——被点名的 Claude Code 是 0.15%，而真正可观的
-    /// Codex 是 61%、Cursor 4.7%、OpenCode 2.8%，1% 把两者干净地分开，
-    /// 且偏向「宁可多标一句，也不让用户误以为有收益」。
-    public static let negligibleArchivableShareThreshold = 0.01
+    /// 算法只有一处：`ArchivableShare.share(of:totalBytes:)`。
+    public var archivableShare: Double {
+        ArchivableShare.share(of: archivableOccupancy.bytes, totalBytes: occupancy.bytes)
+    }
 
     /// 这台工具的收益是不是低到必须如实标注（PRD §9）。
     ///
     /// 两个条件缺一不可：**确实有可归档字节**（否则 0 不叫「极小」，叫「没有」，
-    /// 该由数字本身说明），且占比低于门槛。
+    /// 该由数字本身说明），且占比低于门槛。判定与门槛都只有一处：
+    /// `ArchivableShare.isNegligible(archivableBytes:totalBytes:)`。
     public var isArchivableShareNegligible: Bool {
-        archivableOccupancy.bytes > 0 && archivableShare < Self.negligibleArchivableShareThreshold
+        ArchivableShare.isNegligible(archivableBytes: archivableOccupancy.bytes, totalBytes: occupancy.bytes)
     }
 }
 

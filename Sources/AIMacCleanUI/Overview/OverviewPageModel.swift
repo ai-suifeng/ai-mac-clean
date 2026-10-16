@@ -182,7 +182,7 @@ public final class OverviewPageModel: ObservableObject {
     public var archivableShareText: String? {
         guard let report = visibleReport else { return nil }
         return L10n.format(.overviewArchivableValue, [
-            ShareText.string(fromShare: report.archivableShare),
+            ArchivableShare.percentText(report.archivableShare),
             ByteSizeDisplay.string(from: report.archivableOccupancy.bytes),
         ], language: language)
     }
@@ -269,7 +269,7 @@ public final class OverviewPageModel: ObservableObject {
     private func toolRow(_ report: ToolScanReport, homeDirectory: String) -> OverviewToolRow {
         let occupancyText = occupancyText(report.occupancy)
         let displayPath = ToolRootDisplay.abbreviated(report.toolRootPath, homeDirectory: homeDirectory)
-        let share = ShareText.string(fromShare: report.archivableShare)
+        let share = ArchivableShare.percentText(report.archivableShare)
         let archivableSize = ByteSizeDisplay.string(from: report.archivableOccupancy.bytes)
         let negligible = report.isArchivableShareNegligible ? L10n.text(.overviewToolNegligible, language: language) : nil
         let displayOnly = report.displayOnlyOccupancy.bytes > 0

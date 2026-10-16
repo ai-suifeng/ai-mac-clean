@@ -148,6 +148,22 @@ final class ClassificationDetailPresentationTests: XCTestCase {
         XCTAssertTrue(empty.categoryRows.isEmpty, "没有数据的类别不留占位空行")
     }
 
+    func test一个字节都不可归档的工具不标极小() {
+        // 与概览页**同一条判定**（`ArchivableShare.isNegligible`）：有占用、但可归档是 0
+        // 不叫「极小」，叫「没有」（GLOSSARY / PRD §9 的诚实展示）。
+        // 此前明细页只看「占比 < 1%」，会把它标成极小，而概览页不会——同一台工具两页说法矛盾。
+        let nothingArchivable = detail(
+            ClassificationDetailFixture.tool(
+                archivableBytes: 0,
+                protectedBytes: ClassificationDetailFixture.bytes(5)
+            )
+        )
+
+        XCTAssertEqual(nothingArchivable.archivableShareText, "0%")
+        XCTAssertFalse(nothingArchivable.isArchivableShareTiny, "0 字节可归档不叫「极小」，叫「没有」")
+        XCTAssertNil(nothingArchivable.tinyArchivableShareNotice)
+    }
+
     // MARK: - 子路径明细：受保护的大头要显眼，归属要说得清
 
     func test受保护的大头按子路径列出并逐条给出归属() {
