@@ -110,3 +110,4 @@
 "classification.empty" = "No tool has been confirmed yet. Confirm your AI tools on the Discover & Confirm page and their usage will be listed by category here.";
 "classification.issue.noRules" = "No built-in rule files were loaded, so nothing can be classified and no usage is shown here. Check that the packaged app embeds the rules resources.";
 "classification.issue.rulesRejected" = "%@ rule file(s) were loaded, but none of them passed rule-set admission (the protection-monotonicity check), so nothing can be classified.";
+"classification.category.share" = "%@ of this tool";

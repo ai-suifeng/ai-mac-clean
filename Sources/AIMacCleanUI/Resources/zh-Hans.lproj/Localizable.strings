@@ -113,3 +113,4 @@
 "classification.empty" = "还没有确认过任何工具。先到「发现与确认」页确认 AI 工具，这里才会按类别列出占用。";
 "classification.issue.noRules" = "没有加载到任何内置规则文件，无法判定分类，因此这里不显示占用。请确认打包时把规则资源一并放进了应用包。";
 "classification.issue.rulesRejected" = "加载到 %@ 条规则，但全部未通过规则集准入（保护单调性校验），无法判定分类。";
+"classification.category.share" = "占 %@";

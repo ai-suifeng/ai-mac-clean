@@ -134,6 +134,7 @@ public enum L10n {
         case classificationToolAccessibility = "classification.tool.accessibility"
         case classificationToolAccessibilityValue = "classification.tool.accessibilityValue"
         case classificationCategoryAccessibility = "classification.category.accessibility"
+        case classificationCategoryShare = "classification.category.share"
         case classificationRootToolRoot = "classification.root.toolRoot"
         case classificationRootDisplayOnly = "classification.root.displayOnly"
         case classificationRootDisplayOnlyNote = "classification.root.displayOnly.note"

@@ -13,6 +13,12 @@ public struct DiscoveryView: View {
 
     @ObservedObject private var model: DiscoveryPageModel
 
+    /// 分类明细页（issue #27）的呈现开关。
+    ///
+    /// 深扫的入口是「已确认工具」（PRD §4.1 第 4 步），因此入口挂在已确认工具一栏上。
+    /// 概览页（#28）落地后，同一份 `ClassificationDetailView` 也会从那里进入。
+    @State private var showsClassificationDetail = false
+
     public init(model: DiscoveryPageModel) {
         self.model = model
     }
@@ -32,6 +38,10 @@ public struct DiscoveryView: View {
         }
         .navigationTitle(L10n.text(.discoveryPageTitle))
         .task { model.load() }
+        .sheet(isPresented: $showsClassificationDetail) {
+            ClassificationDetailView(model: .standard())
+                .frame(minWidth: 720, minHeight: 520)
+        }
     }
 
     private var header: some View {
@@ -119,7 +129,15 @@ public struct DiscoveryView: View {
     @ViewBuilder
     private var confirmedSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.text(.discoverySectionConfirmed)).font(.title3)
+            HStack(alignment: .firstTextBaseline) {
+                Text(L10n.text(.discoverySectionConfirmed)).font(.title3)
+                Spacer()
+                if !model.state.confirmedTools.isEmpty {
+                    // 深扫只跑在已确认工具上：没有确认过任何工具时不摆这个入口。
+                    Button(L10n.text(.classificationPageTitle)) { showsClassificationDetail = true }
+                        .accessibilityLabel(L10n.text(.classificationPageTitle))
+                }
+            }
             if model.state.confirmedTools.isEmpty {
                 Text(L10n.text(.discoveryEmptyConfirmed)).foregroundStyle(.secondary)
             } else {
