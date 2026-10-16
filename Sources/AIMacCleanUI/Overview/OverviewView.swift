@@ -13,6 +13,8 @@ import AIMacCleanDomain
 /// - 收益极低的工具带一句「可归档占比极小」，占用数字不用大字号暗示收益。
 /// - 「开始归档」不可用，并在按钮下方写清为什么（不是点了没反应）。
 /// - 磁盘剩余空间读不到时显示「未知」，不显示 0。
+/// - 规则资源没配上时（ticket #32）只显示原因：**一个占用数字都不摆**，
+///   因为没扫过不等于占 0 B。
 public struct OverviewView: View {
 
     @ObservedObject private var model: OverviewPageModel
@@ -25,7 +27,12 @@ public struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
-                if model.isEmpty {
+                if !model.issueTexts.isEmpty {
+                    // 规则资源没配上（或全被准入拒绝）：说清原因，不摆任何占用。
+                    // 磁盘那一行照常给——它是这个卷的真实读数，与「有没有扫到工具」无关。
+                    issueSection
+                    diskSection
+                } else if model.isEmpty {
                     emptyState
                 } else {
                     totalSection
@@ -70,6 +77,28 @@ public struct OverviewView: View {
                 .disabled(model.state.isScanning)
                 .accessibilityLabel(model.reloadTitle)
                 .accessibilityHint(model.reloadShortcutText)
+        }
+    }
+
+    // MARK: - 运行级问题（ticket #32）
+
+    /// 规则资源没配上 / 一条都没过准入时的提示块。
+    ///
+    /// 这里刻意**不出现任何数字**：这些工具根本没被扫过（`OverviewPageModel` 在有问题时
+    /// 连扫都不扫），摆一个 `0 B` 会被读成「这些工具不占空间」。文案本身也要说清
+    /// 「这不是你的机器上没有工具，而是软件自己没配好」。
+    @ViewBuilder
+    private var issueSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(model.issueTexts, id: \.self) { text in
+                    Text(text)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel(text)
+                }
+            }
+            .padding(.vertical, 4)
         }
     }
 
