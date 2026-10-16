@@ -14,9 +14,12 @@ import Foundation
 ///
 /// ## 边界
 ///
-/// - 只暴露浅扫真正需要的三件事：列举一级条目名、读条目**自身**属性、读文件开头若干字节。
+/// - 只暴露浅扫与深扫真正需要的那几件事：列举一级条目名、读条目**自身**属性、
+///   读符号链接的目标、读文件开头若干字节。**没有写操作**——深扫全称零写入
+///   （issue #23 硬约束），可注入层不提供写入口，也就无从写起。
 /// - **不解析符号链接**：`attributes(ofItem:)` 返回的是条目自身的属性，
-///   因此判型与「不跟随符号链接」（User Story 12）仍然成立。
+///   因此判型与「不跟随符号链接」（User Story 12）仍然成立；链接指向哪里由
+///   `symbolicLinkDestination(atPath:)` 单独回答（issue #23）。
 /// - 列举读不到时**抛错**而不是返回空：由调用方按目录粒度隔离（User Story 14），
 ///   「读不到」与「目录是空的」必须能区分开。
 public protocol DiscoveryFileSystem {
@@ -31,6 +34,22 @@ public protocol DiscoveryFileSystem {
     ///
     /// 只读开头，绝不为了判断格式而读完整个文件（User Story 11、PRD §13 第 3 条）。
     func readHeader(ofFileAt path: String, limit: Int) -> String?
+
+    /// 符号链接的目标（`readlink`），不是符号链接时返回 `nil`。
+    ///
+    /// 这是**纯读取**：它回答「这个链接指向哪里」，但绝不因此去访问那个位置
+    /// （issue #23 的「不跟随符号链接」）。深扫需要它来区分「工具根内的链接」与
+    /// 「指向工具根之外的链接」（PRD §8.2），而两者都不进占用统计。
+    ///
+    /// 有默认实现（返回 `nil`），因此本方法加入协议不会破坏既有的文件系统替身；
+    /// 默认实现下所有链接会被当成「目标未知」，按保守方向处理。
+    func symbolicLinkDestination(atPath path: String) -> String?
+}
+
+public extension DiscoveryFileSystem {
+
+    /// 默认实现：不报告链接目标。缺席的目标按「未知」保守处理，不影响「不跟随」。
+    func symbolicLinkDestination(atPath path: String) -> String? { nil }
 }
 
 /// 真实文件系统：`DiscoveryFileSystem` 的默认实现。
@@ -60,5 +79,10 @@ public struct RealDiscoveryFileSystem: DiscoveryFileSystem {
 
         guard let data = try? handle.read(upToCount: limit), !data.isEmpty else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// 符号链接目标；不是符号链接（或读不到）时返回 `nil`。
+    public func symbolicLinkDestination(atPath path: String) -> String? {
+        try? fileManager.destinationOfSymbolicLink(atPath: path)
     }
 }
