@@ -31,7 +31,7 @@ public enum VolumeCapacity: Equatable, Sendable {
         /// 系统没能给出该路径所在卷的读数（路径不存在、无权限等）。
         case volumeUnreadable
 
-        /// 读数拿到了，但里面没有可用的容量数字（总量缺失、可用空间缺失或为负）。
+        /// 读数拿到了，但里面没有可展示的容量数字：总量缺失或不为正、可用空间缺失或为负。
         case capacityNotReported
     }
 
