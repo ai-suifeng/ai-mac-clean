@@ -50,6 +50,7 @@ final class OverviewScanningTests: XCTestCase {
             scanner: scanner,
             capacityReader: StubCapacityReader(reading: .measured(availableBytes: 1_024, totalBytes: 2_048)),
             homeDirectory: fixture.homePath,
+            issueSource: StubIssueSource(),
             scheduler: scheduler
         )
         return (model, fixture)
@@ -190,6 +191,7 @@ final class OverviewScanningTests: XCTestCase {
             scanner: scanner,
             capacityReader: reader,
             homeDirectory: fixture.homePath,
+            issueSource: StubIssueSource(),
             scheduler: .background()
         )
 

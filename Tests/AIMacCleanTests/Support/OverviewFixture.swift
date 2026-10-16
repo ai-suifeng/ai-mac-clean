@@ -12,6 +12,9 @@ final class StubOccupancyScanner: ConfirmedToolScanning {
     /// 被测代码实际交给深扫的那批确认记录，供断言「只扫已确认的工具」。
     private(set) var receivedRecords: [ConfirmationRecord] = []
 
+    /// 被叫去扫了几次。规则没配上时它必须是 0：没有规则就没有可判定的分类。
+    private(set) var scanCount = 0
+
     /// 按收到的记录给出报告。默认返回一份固定报告。
     var reportFor: ([ConfirmationRecord]) -> DeepScanReport
 
@@ -24,9 +27,33 @@ final class StubOccupancyScanner: ConfirmedToolScanning {
     }
 
     func scan(_ records: [ConfirmationRecord]) -> DeepScanReport {
+        scanCount += 1
         receivedRecords = records
         return reportFor(records)
     }
+}
+
+/// 固定的「运行级问题」来源（ticket #32）。
+///
+/// 概览页不自己读规则文件：规则没加载到 / 一条都没过准入这条事实由 `DeepScanSource` 给出。
+/// 记录被问了几次，用来断言「先问问题、有问题就不扫」。
+final class StubIssueSource: DeepScanSource {
+
+    private(set) var issuesCallCount = 0
+
+    var reportedIssues: [DeepScanIssue]
+
+    init(_ reportedIssues: [DeepScanIssue] = []) {
+        self.reportedIssues = reportedIssues
+    }
+
+    func issues() -> [DeepScanIssue] {
+        issuesCallCount += 1
+        return reportedIssues
+    }
+
+    /// 概览页只问 `issues()`；`run()` 是分类明细页的入口，这里如实给出同一批问题。
+    func run() -> DeepScanRun { DeepScanRun(issues: reportedIssues) }
 }
 
 /// 固定容量读数：只回一个值，不看路径（概览页的测试不碰真磁盘）。
