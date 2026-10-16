@@ -103,3 +103,10 @@
 "classification.unreadable.kind.item" = "item (counted as 0 bytes)";
 "classification.unreadable.noReason" = "no reason available";
 "classification.unreadable.footnote" = "Unreadable locations are isolated per directory: only they are missing from the totals. The app never asks for Full Disk Access up front.";
+"classification.page.title" = "Usage by Category";
+"classification.page.stageNote" = "This version only reads metadata and never moves or deletes a file; all four categories are shown, nothing more. Archiving lands in a later milestone.";
+"classification.status.scanning" = "Scanning… (reads metadata and file headers only; nothing is modified)";
+"classification.action.reload" = "Scan Again";
+"classification.empty" = "No tool has been confirmed yet. Confirm your AI tools on the Discover & Confirm page and their usage will be listed by category here.";
+"classification.issue.noRules" = "No built-in rule files were loaded, so nothing can be classified and no usage is shown here. Check that the packaged app embeds the rules resources.";
+"classification.issue.rulesRejected" = "%@ rule file(s) were loaded, but none of them passed rule-set admission (the protection-monotonicity check), so nothing can be classified.";

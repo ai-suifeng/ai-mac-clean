@@ -106,3 +106,10 @@
 "classification.unreadable.kind.item" = "条目（字节数按 0 计）";
 "classification.unreadable.noReason" = "未能取到原因";
 "classification.unreadable.footnote" = "读不到的位置按目录粒度隔离：只有它们没被统计进去。应用不会预先索取完全磁盘访问权限。";
+"classification.page.title" = "分类明细";
+"classification.page.stageNote" = "当前版本只读元数据，不会移动或删除任何文件；四类占用都只展示。归档能力在后续里程碑。";
+"classification.status.scanning" = "正在扫描…（只读元数据与文件头，不动任何文件）";
+"classification.action.reload" = "重新扫描";
+"classification.empty" = "还没有确认过任何工具。先到「发现与确认」页确认 AI 工具，这里才会按类别列出占用。";
+"classification.issue.noRules" = "没有加载到任何内置规则文件，无法判定分类，因此这里不显示占用。请确认打包时把规则资源一并放进了应用包。";
+"classification.issue.rulesRejected" = "加载到 %@ 条规则，但全部未通过规则集准入（保护单调性校验），无法判定分类。";

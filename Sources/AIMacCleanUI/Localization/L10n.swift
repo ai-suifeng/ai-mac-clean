@@ -105,6 +105,13 @@ public enum L10n {
         case discoveryIssueActionFailed = "discovery.issue.actionFailed"
 
         // 工具分类明细（issue #27；PRD §5.1 四类与处理方式、§9）
+        case classificationPageTitle = "classification.page.title"
+        case classificationStageNote = "classification.page.stageNote"
+        case classificationScanning = "classification.status.scanning"
+        case classificationReload = "classification.action.reload"
+        case classificationEmpty = "classification.empty"
+        case classificationIssueNoRules = "classification.issue.noRules"
+        case classificationIssueRulesRejected = "classification.issue.rulesRejected"
         case classificationFileCount = "classification.fileCount"
         case classificationCategoryArchivableSession = "classification.category.archivableSession"
         case classificationCategoryCacheAndLog = "classification.category.cacheAndLog"
