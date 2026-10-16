@@ -191,4 +191,50 @@ final class DeepScanDisplayOnlyRootsTests: XCTestCase {
         XCTAssertEqual(report.unfollowedLinks, [])
         XCTAssertEqual(scan.totalOccupancy, Occupancy(bytes: 1000, fileCount: 1))
     }
+
+    // MARK: - 验收 5：访问仍只在规则声明的根内，且全程零写入
+
+    func test访问只落在规则声明的根内且全程零写入() throws {
+        let fixture = try DeepScanFixture(named: "display-only-access-range")
+        defer { fixture.remove() }
+
+        let cursor = try cursorTool(fixture, classificationJSON: [
+            archivable,
+            "{\"pattern\": \"User/**\", \"category\": \"uncertain\"}",
+        ])
+        try fixture.write(".cursor/projects/p/a.jsonl", bytes: 1000)
+        try fixture.write("Library/Application Support/Cursor/User/state.bin", bytes: 14_000)
+
+        // 诱饵：既不是主根，也不是规则声明的仅展示根。深扫一个字节都不该碰（issue #18/#19）。
+        try fixture.write("诱饵/tool.bin", bytes: 999_999)
+        try fixture.write("Library/Application Support/别的应用/x.bin", bytes: 888_888)
+
+        let recorder = RecordingDiscoveryFileSystem()
+        let scan = scan(recorder, fixture, cursor)
+
+        let declaredRoots = [cursor.rootPath] + cursor.displayOnlyRootPaths
+        let outsideDeclaredRoots = recorder.touchedPaths.filter { path in
+            !declaredRoots.contains { root in path == root || path.hasPrefix(root + "/") }
+        }
+        XCTAssertEqual(
+            outsideDeclaredRoots,
+            [],
+            "访问范围只能落在规则声明的根内：主根 + 规则声明的仅展示根。"
+                + "实际碰过的位置：\n\(recorder.summary)"
+        )
+        XCTAssertEqual(
+            scan.totalOccupancy,
+            Occupancy(bytes: 15_000, fileCount: 2),
+            "诱饵目录既不进占用也不被访问"
+        )
+        XCTAssertTrue(
+            recorder.touched(underOrEqual: fixture.rootPath + "/诱饵").isEmpty,
+            "诱饵目录一次都不该被碰"
+        )
+
+        // 零写入：`RecordingDiscoveryFileSystem` 的写入口会先记账再真的执行，
+        // 因此「记录为空」是「从未试过写」的直接证据，而不是「写失败了」的推断。
+        XCTAssertEqual(recorder.writeAttempts, [], "深扫全程零写入：\n\(recorder.writeSummary)")
+        XCTAssertEqual(recorder.writeSummary, "零写入（没有任何写尝试）")
+    }
 }
