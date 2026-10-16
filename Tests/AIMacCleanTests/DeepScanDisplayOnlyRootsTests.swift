@@ -322,4 +322,53 @@ final class DeepScanDisplayOnlyRootsTests: XCTestCase {
         // MARK: 零写入
         XCTAssertEqual(auditor.writeAttempts, [], "深扫全程零写入：\n\(auditor.writeSummary)")
     }
+
+    // MARK: - 非目录形态的仅展示根（`~/.claude.json` 这类）
+
+    func test文件形态的仅展示根照样进占用且绝不误算可归档() throws {
+        let fixture = try DeepScanFixture(named: "display-only-file-root")
+        defer { fixture.remove() }
+
+        // 规则可以声明一个**文件**形态的根（PRD §5.4 里 `~/.claude.json` 这类主目录作用域的位置）。
+        let claude = try fixture.tool(
+            id: "claude-code",
+            displayName: "Claude Code",
+            relativeRoot: ".claude",
+            displayOnlyRelativeRoots: [".claude.json"],
+            classificationJSON: ["{\"pattern\": \"state/**\", \"category\": \"archivableSession\"}"]
+        )
+        try fixture.write(".claude/state/a.jsonl", bytes: 100)
+        try fixture.write(".claude.json", bytes: 40)
+
+        let report = try XCTUnwrap(
+            scan(RecordingDiscoveryFileSystem(), fixture, claude).toolReport(id: "claude-code")
+        )
+
+        XCTAssertEqual(report.roots.map(\.role), [.toolRoot, .displayOnly])
+        XCTAssertEqual(
+            report.displayOnlyOccupancy,
+            Occupancy(bytes: 40, fileCount: 1),
+            "文件形态的根同样要如实进占用"
+        )
+        XCTAssertEqual(
+            report.category(.archivableSession)?.occupancy,
+            Occupancy(bytes: 100, fileCount: 1),
+            "只有主根里那条会话可归档"
+        )
+        XCTAssertEqual(
+            report.category(.protected)?.occupancy,
+            Occupancy(bytes: 40, fileCount: 1),
+            "`~/.claude.json` 是内置受保护条目（home/claude-state）：文件形态的根也要过内置清单"
+        )
+        XCTAssertEqual(
+            report.category(.protected)?.summaries.first?.protectionReason,
+            "home/claude-state"
+        )
+        XCTAssertEqual(
+            report.category(.protected)?.summaries.first?.subpath,
+            ".claude.json",
+            "根自己的最后一段当子路径，界面才说得清是哪一条"
+        )
+        XCTAssertEqual(report.unreadable, [])
+    }
 }

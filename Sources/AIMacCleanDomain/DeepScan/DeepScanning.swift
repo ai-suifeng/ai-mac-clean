@@ -398,11 +398,6 @@ private struct DirectoryWalk {
     /// 缺失时**静默跳过**：规则声明的路径不存在只说明这台机器上没有这个东西
     /// （PRD §5.4「规则命中路径不存在时静默跳过，不得报错」），不影响主根统计，
     /// 也不在「读不到」清单里留一条——它不是读不到，是没有。
-    /// 仅展示根（issue #31）。
-    ///
-    /// 缺失时**静默跳过**：规则声明的路径不存在只说明这台机器上没有这个东西
-    /// （PRD §5.4「规则命中路径不存在时静默跳过，不得报错」），不影响主根统计，
-    /// 也不在「读不到」清单里留一条——它不是读不到，是没有。
     private mutating func runDisplayOnlyRoot() {
         guard let attributes = fileSystem.attributes(ofItemAt: rootPath) else {
             isPresentOnDisk = false
@@ -430,7 +425,11 @@ private struct DirectoryWalk {
 
         default:
             // 存在的**非目录**条目：规则里会有 `~/.claude.json` 这类文件形态的根。
-            // 按不确定计入占用——宁可如实展示，也绝不算作可归档。
+            // 它照样要进占用（只展示的数据也必须如实出现），但**绝不算作可归档**。
+            //
+            // 分类只能来自内置受保护清单：规则的模式都相对**根**匹配，而某个路径相对
+            // 它就是它自己，谁也匹配不到它。因此文件形态的根要么命中内置清单（`~/.claude.json`
+            // → `home/claude-state`，受保护），要么落进不确定——两种都不是可归档。
             let subpath = PathText.components(of: rootPath).last ?? rootPath
             let size = byteSize(of: attributes)
             if size == nil {
@@ -442,7 +441,12 @@ private struct DirectoryWalk {
                     reason: "读不到文件大小"
                 ))
             }
-            accumulate(resolution: nil, relativePath: subpath, protectionReason: nil, bytes: size ?? 0)
+            accumulate(
+                resolution: nil,
+                relativePath: subpath,
+                protectionReason: protectionReason(forPath: rootPath, relativePath: subpath),
+                bytes: size ?? 0
+            )
         }
     }
 
