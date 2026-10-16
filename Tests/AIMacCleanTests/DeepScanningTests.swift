@@ -17,7 +17,7 @@ final class DeepScanningTests: XCTestCase {
     private let cacheAndLog = "{\"pattern\": \".tmp/**\", \"category\": \"cacheAndLog\"}"
     private let uncertain = "{\"pattern\": \"weird/**\", \"category\": \"uncertain\"}"
 
-    private func tool(_ fixture: DeepScanFixture, relativeRoot: String = "codex") throws -> DeepScanFixture.Tool {
+    private func tool(_ fixture: DeepScanFixture, relativeRoot: String = ".codex") throws -> DeepScanFixture.Tool {
         try fixture.tool(
             id: "codex-cli",
             displayName: "Codex CLI",
@@ -57,14 +57,14 @@ final class DeepScanningTests: XCTestCase {
         defer { fixture.remove() }
 
         let codex = try tool(fixture)
-        try fixture.write("codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 1024)
-        try fixture.write("codex/projects/-Users-x-a/22222222-2222-2222-2222-222222222222.jsonl", bytes: 2048)
-        try fixture.write("codex/projects/-Users-x-a/empty.jsonl", bytes: 0)
-        try fixture.write("codex/sessions/2026/10/14/rollout-2026-10-14T10-00-00.jsonl.zst", bytes: 4096)
-        try fixture.write("codex/sessions/2026/10/14/deep/nested/note.bin", bytes: 512)
-        try fixture.makeDirectory("codex/empty-directory")
-        try fixture.write("codex/.tmp/stale.dat", bytes: 256)
-        try fixture.write("codex/config.toml", bytes: 64)
+        try fixture.write(".codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 1024)
+        try fixture.write(".codex/projects/-Users-x-a/22222222-2222-2222-2222-222222222222.jsonl", bytes: 2048)
+        try fixture.write(".codex/projects/-Users-x-a/empty.jsonl", bytes: 0)
+        try fixture.write(".codex/sessions/2026/10/14/rollout-2026-10-14T10-00-00.jsonl.zst", bytes: 4096)
+        try fixture.write(".codex/sessions/2026/10/14/deep/nested/note.bin", bytes: 512)
+        try fixture.makeDirectory(".codex/empty-directory")
+        try fixture.write(".codex/.tmp/stale.dat", bytes: 256)
+        try fixture.write(".codex/config.toml", bytes: 64)
 
         let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
@@ -84,8 +84,8 @@ final class DeepScanningTests: XCTestCase {
         defer { fixture.remove() }
 
         let codex = try tool(fixture)
-        try fixture.write("codex/projects/p/a.jsonl", bytes: 100)
-        try fixture.write("codex/projects/p/b.jsonl", bytes: 200)
+        try fixture.write(".codex/projects/p/a.jsonl", bytes: 100)
+        try fixture.write(".codex/projects/p/b.jsonl", bytes: 200)
 
         let recorder = RecordingDiscoveryFileSystem()
         let scan = makeScanner(recorder).scan(
@@ -109,10 +109,10 @@ final class DeepScanningTests: XCTestCase {
         defer { fixture.remove() }
 
         let codex = try tool(fixture)
-        try fixture.write("codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 128)
-        try fixture.makeDirectory("codex/empty")
+        try fixture.write(".codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 128)
+        try fixture.makeDirectory(".codex/empty")
         // 读不到的目录同样不许触发任何「顺手修一下权限」之类的写操作。
-        let locked = try fixture.makeDirectory("codex/locked")
+        let locked = try fixture.makeDirectory(".codex/locked")
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
         defer {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
@@ -137,11 +137,11 @@ final class DeepScanningTests: XCTestCase {
         defer { fixture.remove() }
 
         let codex = try tool(fixture)
-        try fixture.write("codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 1000)
-        try fixture.write("codex/projects/-Users-x-a/agent-22222222-2222-2222-2222-222222222222.jsonl", bytes: 500)
-        try fixture.write("codex/.tmp/stale-1.dat", bytes: 300)
-        try fixture.write("codex/.tmp/stale-2.dat", bytes: 40)
-        try fixture.write("codex/weird/mystery.bin", bytes: 77)
+        try fixture.write(".codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 1000)
+        try fixture.write(".codex/projects/-Users-x-a/agent-22222222-2222-2222-2222-222222222222.jsonl", bytes: 500)
+        try fixture.write(".codex/.tmp/stale-1.dat", bytes: 300)
+        try fixture.write(".codex/.tmp/stale-2.dat", bytes: 40)
+        try fixture.write(".codex/weird/mystery.bin", bytes: 77)
 
         let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
@@ -182,9 +182,9 @@ final class DeepScanningTests: XCTestCase {
         defer { fixture.remove() }
 
         let codex = try tool(fixture)
-        try fixture.write("codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 128)
-        try fixture.write("codex/projects/-Users-x-b/22222222-2222-2222-2222-222222222222.jsonl", bytes: 256)
-        try fixture.write("codex/.tmp/nested/deeper/stale.dat", bytes: 32)
+        try fixture.write(".codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 128)
+        try fixture.write(".codex/projects/-Users-x-b/22222222-2222-2222-2222-222222222222.jsonl", bytes: 256)
+        try fixture.write(".codex/.tmp/nested/deeper/stale.dat", bytes: 32)
 
         let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
@@ -208,11 +208,11 @@ final class DeepScanningTests: XCTestCase {
         defer { fixture.remove() }
 
         let codex = try tool(fixture)
-        try fixture.write("codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 4096)
+        try fixture.write(".codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 4096)
         // 一条形状完全像会话、但规则没声明的路径：这是最危险的误判来源。
-        try fixture.write("codex/sessions/2026/10/14/rollout-2026-10-14T10-00-00.jsonl", bytes: 8192)
-        try fixture.write("codex/unknown-place/notes.txt", bytes: 10)
-        try fixture.write("codex/another.jsonl", bytes: 20)
+        try fixture.write(".codex/sessions/2026/10/14/rollout-2026-10-14T10-00-00.jsonl", bytes: 8192)
+        try fixture.write(".codex/unknown-place/notes.txt", bytes: 10)
+        try fixture.write(".codex/another.jsonl", bytes: 20)
 
         let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
@@ -248,6 +248,12 @@ final class DeepScanningTests: XCTestCase {
         )
     }
 
+    /// 一条声明可以落在**文件**上（`config.toml`），也可以落在**目录树**上（`.tmp/**`）。
+    ///
+    /// 注意 `.tmp`（不带 `/**`）只覆盖那个目录本身，**不覆盖**里面的文件——
+    /// 匹配语义是整条相对路径（PRD §5.2、`docs/rule-format.md`），因此想管住
+    /// 目录里的东西必须写 `.tmp/**`。写成裸目录名不会报错，但内容会落到不确定档：
+    /// 这是保守方向（宁可少报可归档，也不多报），下一条用例专门钉住它。
     func test声明了类别的文件按声明分类() throws {
         let fixture = try DeepScanFixture(named: "declared-file")
         defer { fixture.remove() }
@@ -255,16 +261,16 @@ final class DeepScanningTests: XCTestCase {
         let codex = try fixture.tool(
             id: "codex-cli",
             displayName: "Codex CLI",
-            relativeRoot: "codex",
+            relativeRoot: ".codex",
             classificationJSON: [
                 "{\"pattern\": \"projects/**\", \"category\": \"archivableSession\"}",
                 "{\"pattern\": \"config.toml\", \"category\": \"protected\"}",
-                "{\"pattern\": \".tmp\", \"category\": \"cacheAndLog\"}",
+                "{\"pattern\": \".tmp/**\", \"category\": \"cacheAndLog\"}",
             ]
         )
-        try fixture.write("codex/config.toml", bytes: 40)
-        try fixture.write("codex/projects/p/a.jsonl", bytes: 60)
-        try fixture.write("codex/.tmp/x.dat", bytes: 8)
+        try fixture.write(".codex/config.toml", bytes: 40)
+        try fixture.write(".codex/projects/p/a.jsonl", bytes: 60)
+        try fixture.write(".codex/.tmp/x.dat", bytes: 8)
 
         let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex)],
@@ -279,9 +285,92 @@ final class DeepScanningTests: XCTestCase {
         XCTAssertEqual(
             report.category(.cacheAndLog)?.occupancy,
             Occupancy(bytes: 8, fileCount: 1),
-            "声明到目录本身（无 /**）时，目录里的内容按这条声明分类"
+            "`.tmp/**` 管住目录里的内容"
         )
         XCTAssertEqual(report.category(.cacheAndLog)?.summaries.map(\.subpath), [".tmp"])
+    }
+
+    /// 裸目录名只覆盖目录本身，不覆盖里面的文件——内容落进不确定，绝不落进可归档。
+    func test裸目录名不覆盖目录里的文件() throws {
+        let fixture = try DeepScanFixture(named: "bare-directory-pattern")
+        defer { fixture.remove() }
+
+        let codex = try fixture.tool(
+            id: "codex-cli",
+            displayName: "Codex CLI",
+            relativeRoot: ".codex",
+            classificationJSON: [
+                "{\"pattern\": \"cache\", \"category\": \"cacheAndLog\"}",
+            ]
+        )
+        try fixture.write(".codex/cache/x.dat", bytes: 8)
+
+        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
+            tools: [fixture.confirmed(codex)],
+            rules: [codex.rule],
+            homeDirectory: fixture.rootPath
+        )
+
+        let report = try XCTUnwrap(scan.toolReports.first)
+        XCTAssertNil(report.category(.cacheAndLog), "裸目录名不匹配目录里的文件（PRD §5.2 的整条相对路径语义）")
+        XCTAssertEqual(
+            report.category(.uncertain)?.occupancy,
+            Occupancy(bytes: 8, fileCount: 1),
+            "没被声明覆盖 → 不确定；写成裸目录名只是没生效，不会把数据变成可归档"
+        )
+    }
+
+    /// 一条路径同时命中多条声明时，报**判定顺序**最高的那一类（issue #25 验收 6）：
+    /// 受保护 > 不确定 > 缓存与日志 > 可归档会话。取向只有一个——越不容易丢数据越靠前。
+    func test同一路径命中多条声明时按判定顺序归属() throws {
+        let fixture = try DeepScanFixture(named: "precedence")
+        defer { fixture.remove() }
+
+        // 宽泛的可归档声明写在**前**、受保护声明写在**后**：按声明顺序会取到可归档，
+        // 按判定顺序必须取到受保护。
+        let codex = try fixture.tool(
+            id: "codex-cli",
+            displayName: "Codex CLI",
+            relativeRoot: ".codex",
+            classificationJSON: [
+                "{\"pattern\": \"data/**\", \"category\": \"archivableSession\"}",
+                "{\"pattern\": \"data/*.sqlite\", \"category\": \"protected\"}",
+                "{\"pattern\": \"data/*.bin\", \"category\": \"cacheAndLog\"}",
+                "{\"pattern\": \"data/*.blob\", \"category\": \"uncertain\"}",
+            ]
+        )
+        try fixture.write(".codex/data/state.sqlite", bytes: 400)
+        try fixture.write(".codex/data/run.bin", bytes: 30)
+        try fixture.write(".codex/data/thing.blob", bytes: 5)
+        try fixture.write(".codex/data/session.jsonl", bytes: 500)
+
+        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
+            tools: [fixture.confirmed(codex)],
+            rules: [codex.rule],
+            homeDirectory: fixture.rootPath
+        )
+
+        let report = try XCTUnwrap(scan.toolReports.first)
+        XCTAssertEqual(
+            report.category(.archivableSession)?.occupancy,
+            Occupancy(bytes: 500, fileCount: 1),
+            "只有真正只命中可归档那一条的会话才算可归档"
+        )
+        XCTAssertEqual(
+            report.category(.protected)?.occupancy,
+            Occupancy(bytes: 400, fileCount: 1),
+            "受保护是最高档：写在后面的受保护声明不能被写在前面的大范围可归档声明盖过"
+        )
+        XCTAssertEqual(
+            report.category(.cacheAndLog)?.occupancy,
+            Occupancy(bytes: 30, fileCount: 1),
+            "缓存与日志高于可归档会话"
+        )
+        XCTAssertEqual(
+            report.category(.uncertain)?.occupancy,
+            Occupancy(bytes: 5, fileCount: 1),
+            "不确定高于可归档会话（同一路径上的不确定声明压过宽泛的可归档声明）"
+        )
     }
 
     func test未在任何规则里的工具零占用且不留空类别() throws {
@@ -289,7 +378,7 @@ final class DeepScanningTests: XCTestCase {
         defer { fixture.remove() }
 
         let codex = try tool(fixture)
-        let ghost = ConfirmedTool(id: "ghost", displayName: "Ghost", toolRootPath: fixture.rootPath + "/ghost")
+        let ghost = ConfirmedTool(id: "ghost", displayName: "Ghost", toolRootPath: fixture.rootPath + "/.ghost")
 
         let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
             tools: [fixture.confirmed(codex), ghost],

@@ -24,27 +24,27 @@ final class DeepScanBundledRuleTests: XCTestCase {
         let byID = Dictionary(rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         // MARK: Claude Code（`~/.claude`）
-        try fixture.write("claude/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 400)
-        try fixture.write("claude/projects/-Users-x-a/agent-22222222-2222-2222-2222-222222222222.jsonl", bytes: 100)
-        try fixture.write("claude/skills/我的技能/SKILL.md", bytes: 1000)
-        try fixture.write("claude/settings.json", bytes: 64)
+        try fixture.write(".claude/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 400)
+        try fixture.write(".claude/projects/-Users-x-a/agent-22222222-2222-2222-2222-222222222222.jsonl", bytes: 100)
+        try fixture.write(".claude/skills/我的技能/SKILL.md", bytes: 1000)
+        try fixture.write(".claude/settings.json", bytes: 64)
         // 规则未声明的形态完全像会话的路径：必须落进不确定（验收 2 的关键断言在真实规则上也成立）。
-        try fixture.write("claude/sessions/2026/10/14/rollout-2026-10-14T10-00-00.jsonl", bytes: 8192)
+        try fixture.write(".claude/sessions/2026/10/14/rollout-2026-10-14T10-00-00.jsonl", bytes: 8192)
         // `*-bak` 干扰目录：不因为名字像 `~/.claude` 就被当成工具。
         try fixture.write("claude-bak/projects/-Users-x-a/99999999-9999-9999-9999-999999999999.jsonl", bytes: 4096)
 
         // MARK: Codex CLI（`~/.codex`）
-        try fixture.write("codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28.jsonl.zst", bytes: 2048)
-        try fixture.write("codex/sessions/2026/10/14/rollout-2026-10-14T10-00-00.jsonl", bytes: 512)
-        try fixture.write("codex/archived_sessions/rollout-2026-10-13T00-00-00.jsonl.zst", bytes: 256)
-        try fixture.write("codex/.tmp/stale.dat", bytes: 128)
-        try fixture.write("codex/auth.json", bytes: 32)
+        try fixture.write(".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28.jsonl.zst", bytes: 2048)
+        try fixture.write(".codex/sessions/2026/10/14/rollout-2026-10-14T10-00-00.jsonl", bytes: 512)
+        try fixture.write(".codex/archived_sessions/rollout-2026-10-13T00-00-00.jsonl.zst", bytes: 256)
+        try fixture.write(".codex/.tmp/stale.dat", bytes: 128)
+        try fixture.write(".codex/auth.json", bytes: 32)
 
         // MARK: Cursor（`~/.cursor`）
-        let session = "cursor/projects/-Users-x-a/agent-transcripts/33333333-3333-3333-3333-333333333333"
+        let session = ".cursor/projects/-Users-x-a/agent-transcripts/33333333-3333-3333-3333-333333333333"
         try fixture.write(session + "/44444444-4444-4444-4444-444444444444.jsonl", bytes: 700)
         try fixture.write(session + "/subagents/55555555-5555-5555-5555-555555555555.jsonl", bytes: 300)
-        try fixture.write("cursor/assets/未实测.bin", bytes: 64)
+        try fixture.write(".cursor/assets/未实测.bin", bytes: 64)
 
         // MARK: DeepSeek Harness
         try fixture.write(harnessRootSuffix + "/sessions/--Users-x-a--/session-66666666-6666-6666-6666-666666666666/session.jsonl.zstd", bytes: 150)
@@ -52,12 +52,12 @@ final class DeepScanBundledRuleTests: XCTestCase {
 
         // MARK: 指向工具根之外的符号链接
         try fixture.write("外部数据/big.bin", bytes: 1_000_000)
-        try fixture.makeSymbolicLink("codex/external", to: fixture.root.appendingPathComponent("外部数据").path)
+        try fixture.makeSymbolicLink(".codex/external", to: fixture.root.appendingPathComponent("外部数据").path)
 
         let tools = [
-            ConfirmedTool(id: "claude-code", displayName: "Claude Code", toolRootPath: fixture.rootPath + "/claude"),
-            ConfirmedTool(id: "codex-cli", displayName: "Codex CLI", toolRootPath: fixture.rootPath + "/codex"),
-            ConfirmedTool(id: "cursor", displayName: "Cursor", toolRootPath: fixture.rootPath + "/cursor"),
+            ConfirmedTool(id: "claude-code", displayName: "Claude Code", toolRootPath: fixture.rootPath + "/.claude"),
+            ConfirmedTool(id: "codex-cli", displayName: "Codex CLI", toolRootPath: fixture.rootPath + "/.codex"),
+            ConfirmedTool(id: "cursor", displayName: "Cursor", toolRootPath: fixture.rootPath + "/.cursor"),
             ConfirmedTool(
                 id: "deepseek-harness",
                 displayName: "DeepSeek Harness",
@@ -136,6 +136,63 @@ final class DeepScanBundledRuleTests: XCTestCase {
             scan.toolReports.contains { $0.toolRootPath.contains("claude-bak") },
             "`*-bak` 干扰目录没有任何确认记录，深扫入口是已确认工具，它不该被扫"
         )
+    }
+
+    /// 深扫的主入口收的是**已准入的规则集**（`RuleAdmissionReport`）：
+    /// 加载与准入在上游做过一次，深扫不再重复。被准入拒绝的规则因此永远不会参与分类。
+    func test深扫收已准入规则集且被拒绝的规则不参与分类() throws {
+        let fixture = try DeepScanFixture(named: "admitted-report")
+        defer { fixture.remove() }
+
+        // 一条好规则 + 一条会被准入拒绝的规则（把不确定形态降级成可归档）。
+        let good = try RuleLoader.loadRule(from: Data("""
+        {
+          "schemaVersion": 1,
+          "id": "codex-cli",
+          "displayName": "Codex CLI",
+          "roots": [{ "path": "\(fixture.rootPath)/.codex", "role": "toolRoot" }],
+          "classification": [
+            { "pattern": "sessions/**", "category": "archivableSession" }
+          ]
+        }
+        """.utf8), source: "好规则")
+
+        let bad = try RuleLoader.loadRule(from: Data("""
+        {
+          "schemaVersion": 1,
+          "id": "cursor",
+          "displayName": "Cursor",
+          "roots": [{ "path": "\(fixture.rootPath)/.cursor", "role": "toolRoot" }],
+          "classification": [
+            { "pattern": "state.sqlite", "category": "archivableSession" }
+          ]
+        }
+        """.utf8), source: "坏规则")
+
+        let report = RuleSetAdmission.admit(rules: [good, bad], homeDirectory: fixture.rootPath)
+        XCTAssertEqual(report.rejections.count, 1, "坏规则必须被准入拒掉")
+
+        try fixture.write(".codex/sessions/rollout-1.jsonl", bytes: 128)
+        try fixture.write(".cursor/state.sqlite", bytes: 4096)
+
+        let scan = DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
+            tools: [
+                ConfirmedTool(id: "codex-cli", displayName: "Codex CLI", toolRootPath: fixture.rootPath + "/.codex"),
+                ConfirmedTool(id: "cursor", displayName: "Cursor", toolRootPath: fixture.rootPath + "/.cursor"),
+            ],
+            rules: report,
+            homeDirectory: fixture.rootPath
+        )
+
+        XCTAssertEqual(scan.toolReport(id: "codex-cli")?.occupancy, Occupancy(bytes: 128, fileCount: 1))
+        let cursor = try XCTUnwrap(scan.toolReport(id: "cursor"))
+        XCTAssertEqual(
+            cursor.occupancy,
+            Occupancy(bytes: 4096, fileCount: 1),
+            "被拒绝的规则不参与分类，但工具本身仍然被扫、数据仍然被算——只是全落进不确定"
+        )
+        XCTAssertNil(cursor.category(.archivableSession), "被拒绝的规则绝不能给出可归档")
+        XCTAssertEqual(cursor.category(.uncertain)?.occupancy, Occupancy(bytes: 4096, fileCount: 1))
     }
 
     /// 用户确认过、但出厂规则里没有对应规则的工具（未来新增的工具）：

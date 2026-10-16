@@ -29,6 +29,13 @@ import AIMacCleanRules
 public protocol DeepScanning {
     func scan(
         tools: [ConfirmedTool],
+        rules: RuleAdmissionReport,
+        homeDirectory: String
+    ) -> DeepScanReport
+
+    /// 便利入口：直接给一组**已准入**的规则。
+    func scan(
+        tools: [ConfirmedTool],
         rules: [ToolRule],
         homeDirectory: String
     ) -> DeepScanReport
@@ -63,13 +70,36 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
     ///   - options: 并发度等扫描选项。
     public func scan(
         tools: [ConfirmedTool],
+        rules: RuleAdmissionReport,
+        homeDirectory: String,
+        options: DeepScanOptions = DeepScanOptions()
+    ) -> DeepScanReport {
+        let catalog = DeepScanRuleCatalog(report: rules)
+        let results = scanTools(tools, catalog: catalog, homeDirectory: homeDirectory, options: options)
+        // 固定按工具标识排序：并行下完成顺序不确定，而结果必须确定（验收 7）。
+        return DeepScanReport(toolReports: results.sorted { $0.toolID < $1.toolID })
+    }
+
+    public func scan(
+        tools: [ConfirmedTool],
+        rules: RuleAdmissionReport,
+        homeDirectory: String
+    ) -> DeepScanReport {
+        scan(tools: tools, rules: rules, homeDirectory: homeDirectory, options: DeepScanOptions())
+    }
+
+    public func scan(
+        tools: [ConfirmedTool],
         rules: [ToolRule],
         homeDirectory: String,
         options: DeepScanOptions = DeepScanOptions()
     ) -> DeepScanReport {
-        let results = scanTools(tools, rules: rules, homeDirectory: homeDirectory, options: options)
-        // 固定按工具标识排序：并行下完成顺序不确定，而结果必须确定（验收 7）。
-        return DeepScanReport(toolReports: results.sorted { $0.toolID < $1.toolID })
+        scan(
+            tools: tools,
+            rules: RuleAdmissionReport(usableRules: rules, rejections: []),
+            homeDirectory: homeDirectory,
+            options: options
+        )
     }
 
     public func scan(
@@ -84,17 +114,15 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
 
     private func scanTools(
         _ tools: [ConfirmedTool],
-        rules: [ToolRule],
+        catalog: DeepScanRuleCatalog,
         homeDirectory: String,
         options: DeepScanOptions
     ) -> [ToolScanReport] {
         guard !tools.isEmpty else { return [] }
 
-        let rulesByID = Dictionary(rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-
         let parallelism = min(options.maxConcurrentTools, tools.count)
         guard parallelism > 1 else {
-            return tools.map { scanTool($0, rule: rulesByID[$0.id], homeDirectory: homeDirectory) }
+            return tools.map { scanTool($0, catalog: catalog, homeDirectory: homeDirectory) }
         }
 
         // 并行扫多台工具（验收 7）。单台工具内部仍是顺序递归：目录互相独立，但它们共享
@@ -115,7 +143,7 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
                     semaphore.signal()
                     group.leave()
                 }
-                let report = self.scanTool(tool, rule: rulesByID[tool.id], homeDirectory: homeDirectory)
+                let report = self.scanTool(tool, catalog: catalog, homeDirectory: homeDirectory)
                 lock.lock()
                 results.append(report)
                 lock.unlock()
@@ -128,10 +156,14 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
 
     // MARK: - 单台工具
 
-    private func scanTool(_ tool: ConfirmedTool, rule: ToolRule?, homeDirectory: String) -> ToolScanReport {
+    private func scanTool(
+        _ tool: ConfirmedTool,
+        catalog: DeepScanRuleCatalog,
+        homeDirectory: String
+    ) -> ToolScanReport {
         var walk = DirectoryWalk(
             tool: tool,
-            rule: rule,
+            catalog: catalog,
             fileSystem: fileSystem,
             protectedPathListing: protectedPathListing,
             homeDirectory: homeDirectory
@@ -167,10 +199,10 @@ private struct DirectoryWalk {
     }
 
     let tool: ConfirmedTool
+    let catalog: DeepScanRuleCatalog
     let fileSystem: any DiscoveryFileSystem
     let homeDirectory: String
     let protectedPathListing: any ProtectedPathDirectoryListing
-    let resolver: CategoryResolver
     let toolRoot: String
 
     private var buckets: [DataCategory: [BucketKey: Bucket]] = [:]
@@ -180,17 +212,17 @@ private struct DirectoryWalk {
 
     init(
         tool: ConfirmedTool,
-        rule: ToolRule?,
+        catalog: DeepScanRuleCatalog,
         fileSystem: any DiscoveryFileSystem,
         protectedPathListing: any ProtectedPathDirectoryListing,
         homeDirectory: String
     ) {
         self.tool = tool
+        self.catalog = catalog
         self.fileSystem = fileSystem
         self.homeDirectory = homeDirectory
         self.protectedPathListing = protectedPathListing
         self.toolRoot = PathText.normalize(tool.toolRootPath)
-        self.resolver = CategoryResolver(entries: rule?.classification ?? [])
     }
 
     mutating func run() {
@@ -200,36 +232,20 @@ private struct DirectoryWalk {
             recordUnfollowedLink(path: toolRoot, relativePath: "", destination: linkDestination(toolRoot))
             return
         }
-        walk(
-            directory: toolRoot,
-            relativePath: "",
-            category: .uncertain,
-            pattern: nil,
-            provenance: .undeclared,
-            anchor: "",
-            anchorIsFixed: false,
-            protectedReason: nil
-        )
+        walk(directory: toolRoot, relativePath: "", protectedReason: nil)
     }
 
     // MARK: 递归主体
 
     /// 递归一层目录。
     ///
-    /// - Parameters:
-    ///   - anchor: 当前**子路径锚点**：最近一条声明覆盖的那个位置（`projects`、`.tmp`），
-    ///     或未声明子树在工具根下的顶层子项。汇总按它归并。
-    ///   - anchorIsFixed: 锚点是否已经「钉死」。一旦路径落在某条声明之下，它下面的任何
-    ///     未声明目录都挂在同一个锚点上——`projects/<路径>/sub/` 里的东西属于 `projects`，
-    ///     而不是属于 `projects/<路径>/sub`（后者只会把汇总碎成一堆没意义的路径）。
+    /// 类别与子路径锚点都按**每条路径自己**判定（issue #25 的判定顺序 + 模式声明的层级），
+    /// 因此这里不传递类别：一条未声明的路径不可能从父目录「继承」出一个可归档，
+    /// 它只会被判成不确定。唯一往下传的是 `protectedReason`——受保护是一次判定，
+    /// 命中之后整棵子树都是受保护的（父目录已经判过，不必每个文件重判）。
     private mutating func walk(
         directory: String,
         relativePath: String,
-        category: DataCategory,
-        pattern: String?,
-        provenance: CategoryProvenance,
-        anchor: String,
-        anchorIsFixed: Bool,
         protectedReason: String?
     ) {
         let entries: [String]
@@ -302,55 +318,28 @@ private struct DirectoryWalk {
                 }
 
                 if let destination, let reason = protectedTarget {
-                    walk(
-                        directory: destination,
-                        relativePath: childRelative,
-                        category: .protected,
-                        pattern: nil,
-                        provenance: .undeclared,
-                        anchor: childRelative,
-                        anchorIsFixed: true,
-                        protectedReason: reason
-                    )
+                    walk(directory: destination, relativePath: childRelative, protectedReason: reason)
                 }
 
             case .typeDirectory:
-                let resolved = resolver.resolve(
-                    relativePath: childRelative,
-                    inherited: category,
-                    anchor: anchor,
-                    anchorIsFixed: anchorIsFixed,
-                    protection: directoryProtectionReason(forRelativePath:)
-                )
-                walk(
-                    directory: path,
-                    relativePath: childRelative,
-                    category: resolved.category,
-                    pattern: resolved.pattern,
-                    provenance: resolved.provenance,
-                    anchor: resolved.anchor,
-                    anchorIsFixed: resolved.anchorIsFixed,
-                    protectedReason: resolved.protectionReason
-                )
+                // 目录这一层只认「能形容目录本身」的内置条目；文件级条目留给文件自己判。
+                let reason = protectedReason ?? directoryProtectionReason(forRelativePath: childRelative)
+                walk(directory: path, relativePath: childRelative, protectedReason: reason)
 
             default:
                 // 普通文件（以及门、套接字这类非目录条目，按文件计）。只取大小，不读内容。
                 //
-                // 文件**自己**也要过一遍分类判定：一条声明可能就落在某个文件上
-                // （`config.toml`），也可能只落在它所在的目录上（`config.toml` 是目录下的文件时
-                // 靠父目录的类别继承）。只继承父目录会漏掉前者——而这恰恰是受保护条目最常见的形态。
-                // 文件自己可能直接命中文件级条目（`auth.json`、`*.sqlite`、`config.toml*`）；
-                // 也可能只是待在一个已经判为受保护的目录里（`skills/.../SKILL.md`）。
+                // 类别按**这条路径自己**判：命中多条时报判定顺序最高的那一类（issue #25），
+                // 一条都没命中就落进不确定。受保护有三个来源，任一命中即受保护：
+                // 已经在受保护目录里、自己命中文件级内置条目、或自己是受保护目标的链接。
                 let fileProtection = protectedReason
                     ?? protectionReason(forRelativePath: childRelative)
                     ?? resolvedLinkDestination(path: path, destination: linkDestination(path))
                         .flatMap { protectionReason(forPath: $0, relativePath: childRelative) }
-                let resolved = resolver.resolve(
-                    relativePath: childRelative,
-                    inherited: fileProtection == nil ? category : .protected,
-                    anchor: anchor,
-                    anchorIsFixed: anchorIsFixed,
-                    protection: { _ in nil }
+                let resolution = catalog.resolution(
+                    forRelativePath: childRelative,
+                    toolID: tool.id,
+                    isBuiltInProtected: fileProtection != nil
                 )
                 let size = byteSize(of: attributes)
                 if size == nil {
@@ -362,13 +351,10 @@ private struct DirectoryWalk {
                         reason: "读不到文件大小"
                     ))
                 }
-                // 锚点为空只可能出现在工具根这一层（根目录本身不是一条声明）：
-                // 直接放在工具根下的文件按它自己的名字成一条，不进任何目录的汇总。
-                accumulated(
-                    resolution: resolved,
+                accumulate(
+                    resolution: resolution,
+                    relativePath: childRelative,
                     protectionReason: fileProtection,
-                    fallbackPattern: pattern,
-                    fallbackAnchor: childRelative,
                     bytes: size ?? 0
                 )
             }
@@ -380,29 +366,33 @@ private struct DirectoryWalk {
     /// 把一个文件记进某个「类别 / 子路径」桶。
     ///
     /// - Parameters:
-    ///   - fallbackAnchor: 判定没给出锚点时用它（工具根直接下挂的文件）。
-    ///   - fallbackPattern: 判定没给出模式时用它（继承自最近一条声明）。
-    private mutating func accumulated(
-        resolution: CategoryResolver.Resolution,
+    ///   - resolution: 规则层的判定结果；`nil` 表示这台工具没有对应规则，
+    ///     一律按「未声明 → 不确定」处理。
+    ///   - protectionReason: 非 `nil` 表示受保护。它压过规则声明的任何类别
+    ///     （PRD §8.1：内置清单是下界，规则不能把它改判）。
+    private mutating func accumulate(
+        resolution: DeepScanRuleCatalog.RuleMatchResolution?,
+        relativePath: String,
         protectionReason: String?,
-        fallbackPattern: String?,
-        fallbackAnchor: String,
         bytes: Int64
     ) {
-        let anchor = resolution.anchor.isEmpty ? fallbackAnchor : resolution.anchor
+        let category: DataCategory = protectionReason == nil
+            ? (resolution?.category ?? .uncertain)
+            : .protected
+        let anchor = resolution?.anchor ?? relativePath
         let key = BucketKey(anchor: anchor, protectionReason: protectionReason)
 
-        var byKey = buckets[resolution.category] ?? [:]
+        var byKey = buckets[category] ?? [:]
         var bucket = byKey[key] ?? Bucket(
             anchor: anchor,
             protectionReason: protectionReason,
-            pattern: protectionReason == nil ? (resolution.pattern ?? fallbackPattern) : nil,
-            provenance: protectionReason == nil ? resolution.provenance : .undeclared
+            pattern: protectionReason == nil ? resolution?.pattern : nil,
+            provenance: protectionReason == nil ? (resolution?.provenance ?? .undeclared) : .undeclared
         )
         bucket.bytes += bytes
         bucket.fileCount += 1
         byKey[key] = bucket
-        buckets[resolution.category] = byKey
+        buckets[category] = byKey
     }
 
     /// 相对路径 → 内置受保护条目名（未命中为 `nil`）。**只看这条路径本身。**
@@ -521,173 +511,132 @@ private struct DirectoryWalk {
     }
 }
 
-// MARK: - 分类判定
+// MARK: - 规则目录
 
-/// 一条分类条目在匹配时的排序键。
-private struct RankedEntry {
-    let order: Int
-    let specificity: Int
-    let wildcardCount: Int
-    let pattern: String
-    let category: DataCategory
-    let pathPattern: PathPattern
-    /// 模式是否以 `**` 结尾：声明的是「这一层之下」，而不是这一层本身。
-    let isRecursiveWildcard: Bool
-}
-
-/// 路径 → 类别（issue #23：分类**只认规则声明的映射**）。
+/// 深扫要用的「规则目录」：把已准入的规则集包成按工具标识取类别的东西。
 ///
-/// ## 判定顺序
-///
-/// 1. 路径**本身**被某条声明命中 → 用这条声明的类别，锚点就是它自己；
-/// 2. 否则沿父目录逐级向上，取**最近一条**把它盖住的声明（`projects/**` 覆盖
-///    `projects/<编码路径>/<uuid>.jsonl` 这样的深层文件），锚点取那条声明命中过的**最高**一层；
-/// 3. 路径在一条声明的**下面**却没被这条声明覆盖（`.tmp/cache/stale.dat` 之于 `.tmp/**`）：
-///    锚点保持声明那一层，类别继承父目录已经定下的类别；
-/// 4. 整条路径从工具根起就没被任何声明盖住：**不确定**，锚点是它在工具根下的顶层子项。
-///
-/// 换句话说「未声明 → 不确定」不是某一步的特例，而是整棵未声明子树的默认值：
-/// 类别只可能从某条声明**继承**下来，永远不可能凭空变成可归档。
-///
-/// 同一层级上多条声明命中时，**更具体的一条赢**（段数多者优先、通配少者优先），
-/// 相同则按规则文件里的声明顺序取第一条。声明顺序本身有意义（规则作者把特例写在前面），
-/// 但「具体优先」能让 `settings*.json` 不被 `**` 之类的泛化声明吃掉。
-private struct CategoryResolver {
+/// 类别判定**不在本层实现**：它由规则层的 `RuleSetAdmission` +
+/// `ClassificationResolution`（issue #25）负责。深扫只做两件事——把该判的路径送去判、
+/// 把判出来的结论归到子路径上。这样「同一路径命中多条时报哪一类」只有一处实现，
+/// 深扫不会和界面给出两套答案。
+struct DeepScanRuleCatalog {
 
-    private let entries: [RankedEntry]
+    private let report: RuleAdmissionReport
+    private let rulesByID: [String: ToolRule]
 
-    init(entries: [ClassificationEntry]) {
-        self.entries = entries.enumerated().map { order, entry in
-            RankedEntry(
-                order: order,
-                specificity: entry.pattern.segments.count,
-                wildcardCount: entry.pattern.segments.reduce(0) { total, segment in
-                    total + segment.tokens.filter { $0 == .wildcard }.count
-                },
-                pattern: entry.pattern.canonicalString,
-                category: entry.category,
-                pathPattern: entry.pattern,
-                isRecursiveWildcard: entry.pattern.segments.last?.tokens == [.literal("**")]
-            )
-        }
-        .sorted { lhs, rhs in
-            if lhs.specificity != rhs.specificity { return lhs.specificity > rhs.specificity }
-            if lhs.wildcardCount != rhs.wildcardCount { return lhs.wildcardCount < rhs.wildcardCount }
-            return lhs.order < rhs.order
-        }
-    }
-
-    /// 判定一条相对路径的类别。
-    ///
-    /// - Parameter protection: 内置受保护判定（`BuiltInProtectedPaths`）。路径是**目录**
-    ///   时在规则判定之前先过它：受保护是「禁止归档、禁止移除」的硬约束（GLOSSARY），
-    ///   规则只能抬高不能降低，因此它的结论优先。核心受保护对象是目录（`skills/`、
-    ///   `statsig/`、`staging/`），文件则在本层由调用方单独判定。
-    func resolve(
-        relativePath: String,
-        inherited: DataCategory,
-        anchor: String,
-        anchorIsFixed: Bool,
-        protection: (String) -> ProtectedPathMatch?
-    ) -> Resolution {
-        if let protected = protection(relativePath) {
-            return Resolution(
-                category: .protected,
-                protectionReason: protected,
-                anchor: relativePath,
-                pattern: nil,
-                provenance: .undeclared,
-                anchorIsFixed: true
-            )
-        }
-
-        // 沿「自己 → 父目录 → 更上层」逐级比对，第一层命中的就是锚点。
-        //
-        //    为什么从最高层往下找：`X/**` 这类声明永远匹配不上 `X` 自己（`**` 至少吃一段），
-        //    而它声明的正是「`X` 这一层之下的东西」。`X` 因此要按声明模式的**基**来认
-        //    （`firstDeclaredParentMatch`），否则 `.tmp/stale.dat` 会一路落到「未声明」。
-        //    取最高的那一层当锚点，才不会把汇总碎成一堆项目目录名；命中的是哪条声明并不因此
-        //    改变（同一层里更具体的先被取到）。
-        var prefixes = PathText.components(of: relativePath)
-        var matched: (ancestor: String, entry: RankedEntry)?
-        while !prefixes.isEmpty, matched == nil {
-            let prefix = prefixes.joined(separator: "/")
-            // 「直接命中一条声明」优先于「正好是某条 `**` 声明的基」。
-            let direct = firstMatch(prefix, where: { !$0.isRecursiveWildcard })
-            if let entry = direct ?? firstDeclaredParentMatch(prefix) {
-                matched = (prefix, entry)
-            }
-            prefixes.removeLast()
-        }
-
-        if let matched {
-            // 命中的就是路径自己 → 这条路径被直接声明；否则只是被一条声明覆盖着。
-            let isSelf = matched.ancestor == relativePath
-            return Resolution(
-                category: matched.entry.category,
-                protectionReason: nil,
-                anchor: matched.ancestor,
-                pattern: matched.entry.pattern,
-                provenance: isSelf
-                    ? .declaredPath(matched.entry.pattern)
-                    : .declaredAncestor(matched.entry.pattern),
-                anchorIsFixed: true
-            )
-        }
-
-        // 没有任何声明盖住它：类别只能继承父目录已经定下的那一类。
-        //    锚点已经钉死时保持不动；否则归到工具根下的顶层子项，别把汇总碎成一堆深层路径。
-        let resolvedAnchor = anchorIsFixed
-            ? anchor
-            : (PathText.components(of: relativePath).first ?? relativePath)
-
-        return Resolution(
-            category: inherited,
-            protectionReason: nil,
-            anchor: resolvedAnchor,
-            pattern: nil,
-            provenance: .undeclared,
-            anchorIsFixed: anchorIsFixed
+    init(report: RuleAdmissionReport) {
+        self.report = report
+        self.rulesByID = Dictionary(
+            report.usableRules.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
     }
 
-    /// 按优先级取第一条被 `relativePath` 覆盖的声明。
-    private func firstMatch(
-        _ relativePath: String,
-        where predicate: (RankedEntry) -> Bool
-    ) -> RankedEntry? {
-        guard !relativePath.isEmpty else { return nil }
-        return entries.first { $0.pathPattern.matches(relativePath: relativePath) && predicate($0) }
+    /// 某台工具声明的规则；没有对应规则时为 `nil`。
+    func rule(forTool id: String) -> ToolRule? {
+        rulesByID[id]
     }
 
-    /// 某条以 `**` 结尾的声明，其**基**是否正好是这个路径。
-    ///
-    /// `projects/**` 认 `projects`、`archived_sessions/**` 认 `archived_sessions`。
-    /// 反过来 `projects/<编码路径>/**` 认的是 `projects/<编码路径>`，不会认 `projects`——
-    /// 于是锚点仍然停在声明写的那一层，不需要知道具体编码路径长什么样。
-    private func firstDeclaredParentMatch(_ relativePath: String) -> RankedEntry? {
-        guard !relativePath.isEmpty else { return nil }
-        return entries.first { entry in
-            guard entry.isRecursiveWildcard else { return false }
-            let components = entry.pathPattern.segments
-            guard components.count > 1 else { return false }
-            let base = PathPattern(segments: Array(components.dropLast()))
-            return base.matches(relativePath: relativePath)
+    /// 某条相对路径的规则声明命中情况。
+    func resolution(
+        forRelativePath relativePath: String,
+        toolID: String,
+        isBuiltInProtected: Bool
+    ) -> RuleMatchResolution? {
+        guard rulesByID[toolID] != nil else { return nil }
+
+        // 按判定顺序归属（受保护 > 不确定 > 缓存与日志 > 可归档会话），
+        // 未命中任何条目则按「不确定」（issue #25、PRD §5.1）。
+        let category = report.category(
+            forRelativePath: relativePath,
+            ruleID: toolID,
+            isBuiltInProtected: isBuiltInProtected
+        )
+        guard let category else { return nil }
+
+        // 类别定了，子路径锚点还要定：同一类别的多个文件要能汇总到一处，
+        // 界面才看得清「这一类的占用集中在哪」。
+        if let declared = declaredBase(forRelativePath: relativePath, toolID: toolID) {
+            return RuleMatchResolution(
+                category: category,
+                anchor: declared.path,
+                pattern: declared.pattern,
+                provenance: declared.path == relativePath
+                    ? .declaredPath(declared.pattern)
+                    : .declaredAncestor(declared.pattern)
+            )
         }
+
+        // 没有任何声明覆盖它（类别因此来自「未命中 → 不确定」这一档）：
+        // 锚点取它在工具根下的顶层子项，别把汇总碎成一堆深层路径。
+        let components = PathText.components(of: relativePath)
+        return RuleMatchResolution(
+            category: category,
+            anchor: components.first ?? relativePath,
+            pattern: nil,
+            provenance: .undeclared
+        )
     }
 
-    /// 受保护判定的结果：命中时给出内置条目名，未命中为 `nil`。
-    typealias ProtectedPathMatch = String
+    /// 判出一条路径是被哪条模式声明的（只看这条路径**自己**，不看上级）。
+    private struct DeclaredBase {
+        let path: String
+        let pattern: String
+    }
 
-    struct Resolution {
+    /// 路径自己是否被某条模式声明；是的话给出「声明的那一层」。
+    private func declaredBase(forRelativePath relativePath: String, toolID: String) -> DeclaredBase? {
+        guard let rule = rulesByID[toolID], !relativePath.isEmpty else { return nil }
+        guard let entry = firstMatchingEntry(relativePath, rule: rule) else { return nil }
+
+        // 锚点取模式的**字面部分**，而不是匹配到的路径本身：
+        // `projects/<编码路径>/<uuid>.jsonl` 声明的是「每个项目下的每份转录」，
+        // 字面部分是 `projects`，因此这一类汇总到 `projects` 一条；
+        // 而 `projects/**` 的字面部分同样是 `projects`。两者因此归到一起，
+        // 不会把汇总碎成几百个项目目录名。
+        let base = literalBase(of: entry.pattern)
+        return DeclaredBase(path: base.isEmpty ? relativePath : base, pattern: entry.pattern.canonicalString)
+    }
+
+    /// 按判定顺序取第一条覆盖该路径的分类条目。
+    private func firstMatchingEntry(_ relativePath: String, rule: ToolRule) -> ClassificationEntry? {
+        rule.classification
+            .filter { $0.pattern.matches(relativePath: relativePath) }
+            .min { lhs, rhs in
+                let lhsRank = Self.precedenceRank(lhs.category)
+                let rhsRank = Self.precedenceRank(rhs.category)
+                if lhsRank != rhsRank { return lhsRank < rhsRank }
+                return lhs.pattern.segments.count > rhs.pattern.segments.count
+            }
+    }
+
+    /// 模式的**字面前缀**：第一个带通配或占位符的段之前的所有段。
+    ///
+    /// `projects/**` → `projects`；`projects/<编码路径>/<uuid>.jsonl` → `projects`；
+    /// `config.toml` → `config.toml`。尾部的 `**` 也算通配（它意味着「这一层之下」），
+    /// 因此不会把 `**` 当成目录名写进子路径。
+    private func literalBase(of pattern: PathPattern) -> String {
+        var literals: [String] = []
+        for segment in pattern.segments {
+            guard segment.tokens.count == 1,
+                  case let .literal(text) = segment.tokens[0],
+                  text != "**"
+            else { break }
+            literals.append(text)
+        }
+        return literals.joined(separator: "/")
+    }
+
+    private static func precedenceRank(_ category: DataCategory) -> Int {
+        ClassificationResolution.precedence.firstIndex(of: category) ?? ClassificationResolution.precedence.count
+    }
+
+    /// 一次「路径 → 类别 + 子路径锚点」的判定结果。
+    struct RuleMatchResolution {
         let category: DataCategory
-        /// 这一层是受保护目录时，命中的内置条目（`skills`、`statsig`）。仅供说明用。
-        let protectionReason: String?
         let anchor: String
         let pattern: String?
         let provenance: CategoryProvenance
-        /// 从这条路径起锚点已经钉死（它落在某条声明之下，或它本身就是一层未声明子树的顶）。
-        let anchorIsFixed: Bool
     }
 }
 

@@ -24,32 +24,32 @@ final class DeepScanPermissionIsolationTests: XCTestCase {
         let codex = try fixture.tool(
             id: "codex-cli",
             displayName: "Codex CLI",
-            relativeRoot: "codex",
+            relativeRoot: ".codex",
             classificationJSON: [
                 "{\"pattern\": \"projects/**\", \"category\": \"archivableSession\"}",
             ]
         )
-        try fixture.write("codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 1000)
-        try fixture.write("codex/projects/-Users-x-b/22222222-2222-2222-2222-222222222222.jsonl", bytes: 2000)
+        try fixture.write(".codex/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 1000)
+        try fixture.write(".codex/projects/-Users-x-b/22222222-2222-2222-2222-222222222222.jsonl", bytes: 2000)
 
         // 一个读不到的目录：里面有一个 5000 字节的文件，谁也统计不到。
-        let secret = try fixture.makeDirectory("codex/projects/-Users-x-secret")
+        let secret = try fixture.makeDirectory(".codex/projects/-Users-x-secret")
         try Data(repeating: 0x41, count: 5000).write(to: secret.appendingPathComponent("hidden.jsonl"))
         // 另一个读不到的目录：只有它能证明「读不到」不等于「是空的」。
-        try fixture.makeDirectory("codex/empty-but-unreadable")
+        try fixture.makeDirectory(".codex/empty-but-unreadable")
         // 相对工具根的路径（报告里用的形态）。
         let unreadables = ["projects/-Users-x-secret", "empty-but-unreadable"]
         for relative in unreadables {
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o000],
-                ofItemAtPath: fixture.root.appendingPathComponent("codex/" + relative).path
+                ofItemAtPath: fixture.root.appendingPathComponent(".codex/" + relative).path
             )
         }
         defer {
             for relative in unreadables {
                 try? FileManager.default.setAttributes(
                     [.posixPermissions: 0o755],
-                    ofItemAtPath: fixture.root.appendingPathComponent("codex/" + relative).path
+                    ofItemAtPath: fixture.root.appendingPathComponent(".codex/" + relative).path
                 )
             }
         }
@@ -91,7 +91,7 @@ final class DeepScanPermissionIsolationTests: XCTestCase {
         let codex = try fixture.tool(
             id: "codex-cli",
             displayName: "Codex CLI",
-            relativeRoot: "codex",
+            relativeRoot: ".codex",
             classificationJSON: ["{\"pattern\": \"projects/**\", \"category\": \"archivableSession\"}"]
         )
         let cursor = try fixture.tool(
@@ -100,10 +100,10 @@ final class DeepScanPermissionIsolationTests: XCTestCase {
             relativeRoot: "cursor",
             classificationJSON: ["{\"pattern\": \"projects/**\", \"category\": \"archivableSession\"}"]
         )
-        try fixture.write("codex/projects/-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 100)
+        try fixture.write(".codex/projects/-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 100)
         try fixture.write("cursor/projects/-b/22222222-2222-2222-2222-222222222222.jsonl", bytes: 400)
 
-        let locked = try fixture.makeDirectory("codex/private")
+        let locked = try fixture.makeDirectory(".codex/private")
         try Data(repeating: 0x41, count: 999).write(to: locked.appendingPathComponent("x.jsonl"))
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o000],
@@ -132,18 +132,18 @@ final class DeepScanPermissionIsolationTests: XCTestCase {
         let codex = try fixture.tool(
             id: "codex-cli",
             displayName: "Codex CLI",
-            relativeRoot: "codex",
+            relativeRoot: ".codex",
             classificationJSON: [ "{\"pattern\": \"projects/**\", \"category\": \"archivableSession\"}" ]
         )
-        try fixture.write("codex/projects/-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 64)
+        try fixture.write(".codex/projects/-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 64)
 
         // 「列举得到、查属性查不到」是扫描期间文件被删的形态：不能因此让整次扫描失败，
         // 也不能凭形状猜一个大小——按 0 字节计，并把它列出来。
         let fileSystem = VanishingItemFileSystem(
             wrapped: RealDiscoveryFileSystem(),
-            vanishing: fixture.rootPath + "/codex/projects/-a/22222222-2222-2222-2222-222222222222.jsonl"
+            vanishing: fixture.rootPath + "/.codex/projects/-a/22222222-2222-2222-2222-222222222222.jsonl"
         )
-        try fixture.write("codex/projects/-a/22222222-2222-2222-2222-222222222222.jsonl", bytes: 4096)
+        try fixture.write(".codex/projects/-a/22222222-2222-2222-2222-222222222222.jsonl", bytes: 4096)
 
         let scan = makeScanner(fileSystem).scan(
             tools: [fixture.confirmed(codex)],

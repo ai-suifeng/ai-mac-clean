@@ -31,7 +31,7 @@ final class DeepScanProtectedPathTests: XCTestCase {
         let codex = try fixture.tool(
             id: "codex-cli",
             displayName: "Codex CLI",
-            relativeRoot: "codex",
+            relativeRoot: ".codex",
             classificationJSON: [
                 "{\"pattern\": \"sessions/**\", \"category\": \"archivableSession\"}",
                 "{\"pattern\": \"skills/**\", \"category\": \"protected\"}",
@@ -39,13 +39,13 @@ final class DeepScanProtectedPathTests: XCTestCase {
         )
         // 技能：164 个文件（PRD §14.5 的实测数量），规则声明为受保护。
         for index in 0..<164 {
-            try fixture.write("codex/skills/skill-\(index)/SKILL.md", bytes: 100)
+            try fixture.write(".codex/skills/skill-\(index)/SKILL.md", bytes: 100)
         }
         // 凭证：`auth.json` 是**纯凭证文件名**，任何位置都保护（内置条目 credential/auth）。
         // 规则**没有**声明它——保护必须来自内置清单，而不是靠规则作者记得写。
-        try fixture.write("codex/auth.json", bytes: 900)
+        try fixture.write(".codex/auth.json", bytes: 900)
         // 可归档：规则声明了。
-        try fixture.write("codex/sessions/2026/10/14/rollout-1.jsonl.zst", bytes: 4096)
+        try fixture.write(".codex/sessions/2026/10/14/rollout-1.jsonl.zst", bytes: 4096)
 
         let auditor = AuditorFileSystem()
         let scan = makeScanner(auditor).scan(
@@ -202,16 +202,16 @@ final class DeepScanProtectedPathTests: XCTestCase {
         let codex = try fixture.tool(
             id: "codex-cli",
             displayName: "Codex CLI",
-            relativeRoot: "codex",
+            relativeRoot: ".codex",
             classificationJSON: [
                 "{\"pattern\": \"sessions/**\", \"category\": \"archivableSession\"}",
             ]
         )
-        try fixture.write("codex/sessions/rollout-1.jsonl", bytes: 64)
+        try fixture.write(".codex/sessions/rollout-1.jsonl", bytes: 64)
         // 用户自己的媒体库：在工具根之外，也不受任何内置条目保护。
         try fixture.write("movies/巨大的视频.bin", bytes: 100_000)
         try fixture.makeSymbolicLink(
-            "codex/sessions/movies",
+            ".codex/sessions/movies",
             to: fixture.root.appendingPathComponent("movies").path
         )
 
@@ -246,12 +246,12 @@ final class DeepScanProtectedPathTests: XCTestCase {
         let codex = try fixture.tool(
             id: "codex-cli",
             displayName: "Codex CLI",
-            relativeRoot: "codex",
+            relativeRoot: ".codex",
             classificationJSON: [
                 "{\"pattern\": \"sessions/**\", \"category\": \"archivableSession\"}",
             ]
         )
-        try fixture.write("codex/sessions/rollout-1.jsonl", bytes: 16)
+        try fixture.write(".codex/sessions/rollout-1.jsonl", bytes: 16)
         // 夹具根下摆一个会诱使判定去列举它的位置。
         try fixture.write(".agents/skills/shared.md", bytes: 32)
 
