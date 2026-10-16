@@ -199,11 +199,13 @@ public struct RuleAdmissionReport: Equatable, Sendable {
             .map(\.category)
     }
 
-    /// 准入后的规则集里，某条相对路径被判成什么类别；没有条目覆盖它时返回 `nil`。
+    /// 准入后的规则集里，某条相对路径被判成什么类别；规则被拒绝时返回 `nil`。
     ///
     /// 同一路径命中多条分类条目时按 `ClassificationResolution.precedence`
     /// 的判定顺序归属（受保护 > 不确定 > 缓存与日志 > 可归档会话），
     /// **与规则文件里声明的先后无关**（issue #25 验收 6）。
+    /// 一条都没命中时按 `ClassificationResolution.unclassified`（不确定，仅展示占用）——
+    /// 规则没声明过的数据不能因此被默认成可归档。
     ///
     /// 被拒绝的规则不在 `usableRules` 里，因此**永远不会**通过这条查询给出降级后的类别。
     ///
@@ -212,7 +214,7 @@ public struct RuleAdmissionReport: Equatable, Sendable {
     public func category(forRelativePath path: String, ruleID: String) -> DataCategory? {
         guard usableRule(id: ruleID) != nil else { return nil }
 
-        return ClassificationResolution.preferred(matchingCategories(forRelativePath: path, ruleID: ruleID))
+        return ClassificationResolution.resolve(matches: matchingCategories(forRelativePath: path, ruleID: ruleID))
     }
 }
 

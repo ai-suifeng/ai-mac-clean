@@ -33,6 +33,16 @@ final class ClassificationPrecedenceTests: XCTestCase {
         return RuleSetAdmission.admit(rules: [rule], homeDirectory: try makeHome())
     }
 
+    /// 五份内置规则，经真实加载器读入并准入。
+    private func loadBundledRules() throws -> (rules: [ToolRule], report: RuleAdmissionReport) {
+        let directory = try XCTUnwrap(BuiltInRuleResources.directory, "内置规则应当是 bundle 资源。")
+        let load = RuleLoader.loadRules(inDirectory: directory)
+        XCTAssertEqual(load.diagnostics.map(\.errorDescription), [], "内置规则必须全部读得进来。")
+        let report = RuleSetAdmission.admit(rules: load.rules, homeDirectory: try makeHome())
+        XCTAssertEqual(report.rejections.map(\.description), [], "内置规则必须零拒绝。")
+        return (load.rules, report)
+    }
+
     // MARK: - 判定顺序
 
     func test判定顺序从受保护到可归档会话() {
@@ -86,6 +96,45 @@ final class ClassificationPrecedenceTests: XCTestCase {
             report.category(forRelativePath: "store/blob/abc", ruleID: "user-extension"),
             .cacheAndLog
         )
+    }
+
+    // MARK: - 未命中任何条目时的默认归属
+
+    func test未命中任何分类条目时按不确定归属() {
+        XCTAssertEqual(
+            ClassificationResolution.resolve(matches: []),
+            .uncertain,
+            "规则没有声明过的数据就是「无法安全分类」的数据（PRD §5.1）：默认落在不确定档，绝不默认成可归档。"
+        )
+        XCTAssertEqual(ClassificationResolution.resolve(matches: [.archivableSession]), .archivableSession)
+        XCTAssertEqual(ClassificationResolution.resolve(matches: [.cacheAndLog, .archivableSession]), .cacheAndLog)
+    }
+
+    func test只展示不碰的实测大头不会因为没有声明就被当成可归档() throws {
+        let (_, report) = try loadBundledRules()
+
+        // Cursor AppSupport 实测 14G，全是 Electron / VSCode 内部存储（PRD §5.4、§2.3）：
+        // 它是 displayOnly 根，没有任何可归档形态，未声明的内容一律只展示。
+        XCTAssertEqual(
+            report.category(forRelativePath: "User/workspaceStorage/abc/IndexedDB/file__0.indexeddb.leveldb/LOG",
+                            ruleID: "cursor"),
+            .uncertain
+        )
+        XCTAssertEqual(report.matchingCategories(forRelativePath: "User/workspaceStorage/abc/blob",
+                                                 ruleID: "cursor"),
+                       [],
+                       "AppSupport 下不该有任何「可归档」声明。")
+
+        // Harness 的另一处纯 Electron profile（`@deepseek-ai/dsh-desktop`）同理。
+        XCTAssertEqual(
+            report.category(forRelativePath: "Local Storage/leveldb/000003.log", ruleID: "deepseek-harness"),
+            .uncertain
+        )
+
+        // 工具根里没被规则点名过的数据同样按不确定处理，而不是被默默当成可归档。
+        XCTAssertEqual(report.category(forRelativePath: "some-undeclared-dir/payload.bin",
+                                       ruleID: "codex-cli"),
+                       .uncertain)
     }
 
     // MARK: - 夹具

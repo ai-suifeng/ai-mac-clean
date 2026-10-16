@@ -35,4 +35,16 @@ public enum ClassificationResolution {
         }
         return nil
     }
+
+    /// 未命中任何分类条目时的归属：**不确定**（仅展示占用，不归档）。
+    ///
+    /// 规则没有声明过的数据就是「无法安全分类」的数据（PRD §5.1），因此默认落在
+    /// 不确定档。默认值只有一个方向：**绝不默认成可归档**——那等于让引擎去归档一份
+    /// 规则根本没读懂的数据，而四类占用总得有个归属，不能留下第五类「未分类」。
+    public static let unclassified: DataCategory = .uncertain
+
+    /// 按判定顺序解析一组命中类别；未命中任何条目时取 `unclassified`。
+    public static func resolve(matches categories: [DataCategory]) -> DataCategory {
+        preferred(categories) ?? unclassified
+    }
 }
