@@ -237,4 +237,89 @@ final class DeepScanDisplayOnlyRootsTests: XCTestCase {
         XCTAssertEqual(recorder.writeAttempts, [], "深扫全程零写入：\n\(recorder.writeSummary)")
         XCTAssertEqual(recorder.writeSummary, "零写入（没有任何写尝试）")
     }
+
+    // MARK: - 出厂规则的端到端：PRD §14.1 的那两个大头
+
+    /// 拿**出厂规则**在夹具树上跑：Cursor 的 AppSupport 与 Harness 的
+    /// `@deepseek-ai/dsh-desktop` 都要进占用，并且一个字节都不许可归档。
+    ///
+    /// 树形照 PRD §14.1：`~/.cursor` 2.1G + Cursor AppSupport 14G（可归档 0）、
+    /// DeepSeek Harness 的主根 + 7.0M 的纯 Electron profile。
+    func test出厂规则的仅展示根进占用且一个字节都不可归档() throws {
+        let fixture = try DeepScanFixture(named: "display-only-bundled-rules")
+        defer { fixture.remove() }
+
+        let harnessRoot = "Library/Application Support/deepseek-harness-desktop/harness-home"
+        let cursorAppSupport = "Library/Application Support/Cursor"
+        let harnessElectron = "Library/Application Support/@deepseek-ai/dsh-desktop"
+
+        // Cursor 主根：可归档会话 + 不确定的 assets。
+        try fixture.write(".cursor/projects/-Users-x-a/agent-transcripts/33333333-3333-3333-3333-333333333333/44444444-4444-4444-4444-444444444444.jsonl",
+                          bytes: 1000)
+        try fixture.write(".cursor/assets/未实测.bin", bytes: 64)
+        // Cursor AppSupport（实测 14G，其中 User/ 13G）：全部只展示、不归档。
+        try fixture.write(cursorAppSupport + "/User/Default/state.bin", bytes: 13_000)
+        try fixture.write(cursorAppSupport + "/Cache/blob.bin", bytes: 1000)
+        try fixture.write(cursorAppSupport + "/IndexedDB/store.bin", bytes: 40)
+
+        // Harness 主根：一个可归档会话 + 受保护的 settings.yaml。
+        try fixture.write(harnessRoot + "/sessions/--Users-x-a--/session-66666666-6666-6666-6666-666666666666/session.jsonl.zstd",
+                          bytes: 150)
+        try fixture.write(harnessRoot + "/settings.yaml", bytes: 20)
+        // Harness 的另一处纯 Electron profile（实测 7.0M）：只展示、不归档。
+        try fixture.write(harnessElectron + "/Cache/blob.bin", bytes: 7000)
+        try fixture.write(harnessElectron + "/IndexedDB/store.bin", bytes: 300)
+
+        let auditor = AuditorFileSystem()
+        let scan = DeepScanner(fileSystem: auditor).scan(
+            tools: [
+                ConfirmedTool(id: "cursor", displayName: "Cursor", toolRootPath: fixture.rootPath + "/.cursor"),
+                ConfirmedTool(id: "deepseek-harness", displayName: "DeepSeek Harness",
+                              toolRootPath: fixture.rootPath + "/" + harnessRoot),
+            ],
+            rules: try admittedBundledRules(),
+            homeDirectory: fixture.rootPath
+        )
+
+        // MARK: Cursor：2.1G + 14G 只展示
+        let cursor = try XCTUnwrap(scan.toolReport(id: "cursor"))
+        XCTAssertEqual(cursor.category(.archivableSession)?.occupancy, Occupancy(bytes: 1000, fileCount: 1))
+        XCTAssertEqual(
+            cursor.archivableOccupancy,
+            Occupancy(bytes: 1000, fileCount: 1),
+            "Cursor AppSupport 里一个字节都不许算作可归档（PRD §14.1「范围内可归档 0」）"
+        )
+        XCTAssertEqual(
+            cursor.displayOnlyOccupancy,
+            Occupancy(bytes: 13_000 + 1000 + 40, fileCount: 3),
+            "AppSupport 的占用要如实出现，概览页才能显示「Cursor 2.1G + 14G 只展示」"
+        )
+        XCTAssertEqual(cursor.toolRootOccupancy, Occupancy(bytes: 1000 + 64, fileCount: 2))
+        XCTAssertEqual(cursor.occupancy, cursor.toolRootOccupancy + cursor.displayOnlyOccupancy)
+        XCTAssertEqual(
+            cursor.roots.map(\.path),
+            [fixture.rootPath + "/.cursor", fixture.rootPath + "/" + cursorAppSupport],
+            "规则里的 `~/…` 展开到 homeDirectory；主根在前、仅展示根在后"
+        )
+        XCTAssertEqual(cursor.category(.cacheAndLog)?.occupancy, Occupancy(bytes: 1000, fileCount: 1))
+        XCTAssertEqual(
+            cursor.category(.uncertain)?.occupancy,
+            Occupancy(bytes: 64 + 13_000 + 40, fileCount: 3),
+            "assets/ 与 AppSupport 的 User/、未声明的 IndexedDB/ 都只展示"
+        )
+
+        // MARK: Harness：主根 + 7.0M 纯 Electron profile
+        let harness = try XCTUnwrap(scan.toolReport(id: "deepseek-harness"))
+        XCTAssertEqual(harness.category(.archivableSession)?.occupancy, Occupancy(bytes: 150, fileCount: 1))
+        XCTAssertEqual(
+            harness.displayOnlyOccupancy,
+            Occupancy(bytes: 7000 + 300, fileCount: 2),
+            "`~/Library/Application Support/@deepseek-ai/dsh-desktop` 完全没进占用就是本票要修的口子"
+        )
+        XCTAssertEqual(harness.toolRootOccupancy, Occupancy(bytes: 150 + 20, fileCount: 2))
+        XCTAssertEqual(harness.archivableOccupancy, Occupancy(bytes: 150, fileCount: 1), "仅展示根零可归档")
+
+        // MARK: 零写入
+        XCTAssertEqual(auditor.writeAttempts, [], "深扫全程零写入：\n\(auditor.writeSummary)")
+    }
 }
