@@ -120,9 +120,9 @@ final class ClassificationPrecedenceTests: XCTestCase {
                             ruleID: "cursor"),
             .uncertain
         )
-        XCTAssertEqual(report.matchingCategories(forRelativePath: "User/workspaceStorage/abc/blob",
-                                                 ruleID: "cursor"),
-                       [],
+        XCTAssertFalse(report.matchingCategories(forRelativePath: "User/workspaceStorage/abc/blob",
+                                                 ruleID: "cursor")
+            .contains(.archivableSession),
                        "AppSupport 下不该有任何「可归档」声明。")
 
         // Harness 的另一处纯 Electron profile（`@deepseek-ai/dsh-desktop`）同理。

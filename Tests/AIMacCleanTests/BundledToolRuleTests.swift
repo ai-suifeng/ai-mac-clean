@@ -527,6 +527,44 @@ final class BundledToolRuleTests: XCTestCase {
         })
     }
 
+    /// 「只展示不碰」的实测大头必须出现在占用里，且一律**不可归档**（PRD §2.3、§14.1）。
+    ///
+    /// 它们是：Cursor AppSupport 14G（Electron / VSCode 内部存储）、`~/.codex/.tmp` 879M、
+    /// opencode 的 SQLite 217M、Harness 的另一处纯 Electron profile。
+    func test只展示不碰的实测大头都被归到不可归档的某一类() throws {
+        let (_, report) = try loadBundledRules()
+
+        let displayOnly: [(rule: String, path: String, expected: DataCategory)] = [
+            // Cursor AppSupport：`User/` 13G 全是 Electron profile 存储（IndexedDB、Local Storage…）。
+            ("cursor", "User/workspaceStorage/abc/state.vscdb", .uncertain),
+            ("cursor", "User/globalStorage/cursor.chat/conversation-search.db", .uncertain),
+            ("cursor", "User/globalStorage/cursor.chat/IndexedDB/file__0.indexeddb.leveldb/LOG", .uncertain),
+            // Electron 标准缓存与日志目录（PRD §5.1 逐字点名 Cache / Code Cache / GPUCache / logs）。
+            ("cursor", "Cache/Cache_Data/index", .cacheAndLog),
+            ("cursor", "Code Cache/js/index", .cacheAndLog),
+            ("cursor", "GPUCache/data_0", .cacheAndLog),
+            ("cursor", "logs/main.log", .cacheAndLog),
+            // `~/.codex/.tmp` 879M / 24,849 个陈旧文件。
+            ("codex-cli", ".tmp/2025/10/01/rollout-2025-10-01t09-08-28-abc.jsonl", .cacheAndLog),
+            // opencode 的 SQLite 217M：仅展示，不归档。
+            ("opencode", "state.sqlite", .uncertain),
+            // Harness 的另一处纯 Electron profile（`@deepseek-ai/dsh-desktop`，7.0M，无会话数据）。
+            ("deepseek-harness", "Cache/Cache_Data/index", .cacheAndLog),
+            ("deepseek-harness", "Local Storage/leveldb/000003.log", .uncertain),
+        ]
+
+        for sample in displayOnly {
+            XCTAssertEqual(report.category(forRelativePath: sample.path, ruleID: sample.rule),
+                           sample.expected,
+                           "\(sample.rule) 应把只展示的 \(sample.path) 判为 \(sample.expected.displayText)。")
+            XCTAssertFalse(
+                report.matchingCategories(forRelativePath: sample.path, ruleID: sample.rule)
+                    .contains(.archivableSession),
+                "\(sample.rule) 的 \(sample.path) 不该有任何「可归档」声明（PRD §2.3、§13 第 7 条）。"
+            )
+        }
+    }
+
     /// 兜底通配 `**` 会把受保护区一起吞掉，规则里一条都不许有（issue #25 验收）。
     func test内置规则的分类声明没有兜底通配() throws {
         let (rules, _) = try loadBundledRules()
