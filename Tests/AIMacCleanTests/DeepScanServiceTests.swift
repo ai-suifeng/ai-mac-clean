@@ -255,4 +255,27 @@ final class DeepScanServiceTests: XCTestCase {
         XCTAssertEqual(report.toolReports.first?.displayName, "DeepSeek Harness")
         XCTAssertEqual(report.archivableOccupancy, Occupancy(bytes: 150, fileCount: 1))
     }
+
+    // MARK: - 概览页入口没有确认存储（review 发现 7）
+
+    /// 概览页入口只注入**已准入的规则**：它的确认记录由调用方逐条传给 `scan(_:)`。
+    /// 这里不再用一个「恒为空、被问就抛错」的假存储占位——`run()` 在没有存储时
+    /// 如实给出「没有记录」的空报告，而不是假装有一个存储。
+    func test概览页入口没有确认存储时run如实给出空报告() throws {
+        let rules = RuleSetAdmission.admit(rules: try admittedBundledRules(), homeDirectory: NSTemporaryDirectory())
+        let service = DeepScanService(rules: rules, homeDirectory: NSTemporaryDirectory())
+
+        let run = service.run()
+
+        XCTAssertEqual(run.issues, [], "规则可用：不该报「没有规则」")
+        XCTAssertTrue(
+            run.report.toolReports.isEmpty,
+            "没有确认记录就没有工具：不许凭空造出一台，也不许抛出「存储不可读」"
+        )
+        // 概览页真正用到的入口照常工作：记录由调用方逐条传入，不经过任何存储。
+        XCTAssertEqual(
+            service.confirmedTools(from: [record(id: "claude-code", root: "/tmp/nowhere/.claude")]).map(\.id),
+            ["claude-code"]
+        )
+    }
 }
