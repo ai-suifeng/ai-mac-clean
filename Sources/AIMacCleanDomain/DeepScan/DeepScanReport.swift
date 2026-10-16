@@ -42,14 +42,22 @@ public enum CategoryProvenance: Equatable, Hashable, Sendable {
 }
 
 /// 某个「工具 → 类别 → 子路径」下的占用汇总。
-public struct CategorySummary: Equatable, Sendable {
+public struct CategorySummary: Equatable, Hashable, Sendable {
 
     /// 子路径：相对工具根，指向**命中规则的那一层**（`projects`、`.tmp`），
-    /// 或者未声明路径的顶层目录名。工具根本身用空串表示。
+    /// 或者未声明路径的顶层目录名。工具根直接挂着的文件用它自己的名字。
     public let subpath: String
 
     /// 这次汇总到的分类条目（按模式串原样给出），界面据此说明「这条为什么是这一类」。
+    ///
+    /// 受保护的内置条目不算「规则声明的模式」，因此这时是 `nil`——见 `protectionReason`。
     public let pattern: String?
+
+    /// 受保护判定的命中来源：非 `nil` 表示这一条是**内置受保护清单**判出来的
+    /// （`claude-code/skills`、`credential/auth`），而不是规则声明的。
+    ///
+    /// 两者的区别对用户有意义：规则可以被用户改，内置清单不能（PRD §8.1）。
+    public let protectionReason: String?
 
     /// 归属来源。
     public let provenance: CategoryProvenance
@@ -60,11 +68,13 @@ public struct CategorySummary: Equatable, Sendable {
     public init(
         subpath: String,
         pattern: String?,
+        protectionReason: String? = nil,
         provenance: CategoryProvenance,
         occupancy: Occupancy
     ) {
         self.subpath = subpath
         self.pattern = pattern
+        self.protectionReason = protectionReason
         self.provenance = provenance
         self.occupancy = occupancy
     }

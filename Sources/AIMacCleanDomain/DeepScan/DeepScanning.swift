@@ -143,9 +143,20 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
 /// 单台工具的递归遍历。一次性用完即弃。
 private struct DirectoryWalk {
 
-    /// 一个「工具 → 类别 → 子路径」桶。
+    /// 一个「工具 → 类别 → 子路径」桶的身份。
+    ///
+    /// 受保护理由进键：同一个目录下的文件可能一部分受保护、一部分不受
+    /// （`~/.codex` 本身就是「受保护的顶层」这类内置条目会盖住整棵子树，而普通目录不会）。
+    /// 合成一条会把两类数混在一起，界面就说不清哪部分碰不得。
+    private struct BucketKey: Hashable {
+        let anchor: String
+        let protectionReason: String?
+    }
+
+    /// 一个桶的累加值。
     private struct Bucket {
         let anchor: String
+        let protectionReason: String?
         let pattern: String?
         let provenance: CategoryProvenance
         var bytes: Int64 = 0
@@ -159,7 +170,7 @@ private struct DirectoryWalk {
     let resolver: CategoryResolver
     let toolRoot: String
 
-    private var buckets: [DataCategory: [String: Bucket]] = [:]
+    private var buckets: [DataCategory: [BucketKey: Bucket]] = [:]
 
     private var unreadable: [UnreadableEntry] = []
     private var unfollowedLinks: [UnfollowedLink] = []
@@ -193,7 +204,8 @@ private struct DirectoryWalk {
             pattern: nil,
             provenance: .undeclared,
             anchor: "",
-            anchorIsFixed: false
+            anchorIsFixed: false,
+            protectedReason: nil
         )
     }
 
@@ -214,7 +226,8 @@ private struct DirectoryWalk {
         pattern: String?,
         provenance: CategoryProvenance,
         anchor: String,
-        anchorIsFixed: Bool
+        anchorIsFixed: Bool,
+        protectedReason: String?
     ) {
         let entries: [String]
         do {
@@ -261,15 +274,50 @@ private struct DirectoryWalk {
 
             switch type {
             case .typeSymbolicLink:
-                // 不跟随：既不把目标的占用算进来，也不进目标遍历。
+                // 不跟随（issue #23 硬约束）：默认既不把目标的占用算进来，也不进目标遍历。
+                //
+                // 只有一个例外，而且方向是「更保守」：链接的真实目标被内置清单判为**受保护**
+                // 时，链接指向的就是用户碰不得的东西（`~/.codex/skills → ~/.agents/skills`）。
+                // 这时把它按受保护统计进来，界面上才能如实说「这里有一份受保护的技能，别动它」；
+                // 目标仍不会被归档、不会被移除。
+                //
+                // 目标落在工具根**之外**且不受保护时一律跳过：跟随它等于把扫描带出工具根
+                // （PRD §8.2「指向外部目录的链接一律拒绝处理」）。
+                let destination = resolvedLinkDestination(path: path, destination: linkDestination(path))
                 recordUnfollowedLink(path: path, relativePath: childRelative, destination: linkDestination(path))
+
+                // 只有「目标在内置清单里受保护」的链接才继续统计，这是安全边界：
+                // 指向工具根之外、又不受保护的目录的链接（用户自己的媒体库、别人的仓库）
+                // 一律拒绝处理（PRD §8.2）——一个字节都不读、不跟随。
+                let protectedTarget = destination.flatMap {
+                    BuiltInProtectedPaths.protection(
+                        forPath: $0,
+                        underToolRoot: toolRoot,
+                        homeDirectory: homeDirectory,
+                        listing: protectedPathListing
+                    )?.ruleIdentifier
+                }
+
+                if let destination, let reason = protectedTarget {
+                    walk(
+                        directory: destination,
+                        relativePath: childRelative,
+                        category: .protected,
+                        pattern: nil,
+                        provenance: .undeclared,
+                        anchor: childRelative,
+                        anchorIsFixed: true,
+                        protectedReason: reason
+                    )
+                }
 
             case .typeDirectory:
                 let resolved = resolver.resolve(
                     relativePath: childRelative,
                     inherited: category,
                     anchor: anchor,
-                    anchorIsFixed: anchorIsFixed
+                    anchorIsFixed: anchorIsFixed,
+                    protection: directoryProtectionReason(forRelativePath:)
                 )
                 walk(
                     directory: path,
@@ -278,7 +326,8 @@ private struct DirectoryWalk {
                     pattern: resolved.pattern,
                     provenance: resolved.provenance,
                     anchor: resolved.anchor,
-                    anchorIsFixed: resolved.anchorIsFixed
+                    anchorIsFixed: resolved.anchorIsFixed,
+                    protectedReason: resolved.protectionReason
                 )
 
             default:
@@ -287,11 +336,18 @@ private struct DirectoryWalk {
                 // 文件**自己**也要过一遍分类判定：一条声明可能就落在某个文件上
                 // （`config.toml`），也可能只落在它所在的目录上（`config.toml` 是目录下的文件时
                 // 靠父目录的类别继承）。只继承父目录会漏掉前者——而这恰恰是受保护条目最常见的形态。
+                // 文件自己可能直接命中文件级条目（`auth.json`、`*.sqlite`、`config.toml*`）；
+                // 也可能只是待在一个已经判为受保护的目录里（`skills/.../SKILL.md`）。
+                let fileProtection = protectedReason
+                    ?? protectionReason(forRelativePath: childRelative)
+                    ?? resolvedLinkDestination(path: path, destination: linkDestination(path))
+                        .flatMap { protectionReason(forPath: $0, relativePath: childRelative) }
                 let resolved = resolver.resolve(
                     relativePath: childRelative,
-                    inherited: category,
+                    inherited: fileProtection == nil ? category : .protected,
                     anchor: anchor,
-                    anchorIsFixed: anchorIsFixed
+                    anchorIsFixed: anchorIsFixed,
+                    protection: { _ in nil }
                 )
                 let size = byteSize(of: attributes)
                 if size == nil {
@@ -305,11 +361,11 @@ private struct DirectoryWalk {
                 }
                 // 锚点为空只可能出现在工具根这一层（根目录本身不是一条声明）：
                 // 直接放在工具根下的文件按它自己的名字成一条，不进任何目录的汇总。
-                accumulate(
-                    category: resolved.category,
-                    anchor: resolved.anchor.isEmpty ? childRelative : resolved.anchor,
-                    pattern: resolved.pattern ?? pattern,
-                    provenance: resolved.provenance,
+                accumulated(
+                    resolution: resolved,
+                    protectionReason: fileProtection,
+                    fallbackPattern: pattern,
+                    fallbackAnchor: childRelative,
                     bytes: size ?? 0
                 )
             }
@@ -318,30 +374,76 @@ private struct DirectoryWalk {
 
     // MARK: 汇总
 
-    private mutating func accumulate(
-        category: DataCategory,
-        anchor: String,
-        pattern: String?,
-        provenance: CategoryProvenance,
+    /// 把一个文件记进某个「类别 / 子路径」桶。
+    ///
+    /// - Parameters:
+    ///   - fallbackAnchor: 判定没给出锚点时用它（工具根直接下挂的文件）。
+    ///   - fallbackPattern: 判定没给出模式时用它（继承自最近一条声明）。
+    private mutating func accumulated(
+        resolution: CategoryResolver.Resolution,
+        protectionReason: String?,
+        fallbackPattern: String?,
+        fallbackAnchor: String,
         bytes: Int64
     ) {
-        var byAnchor = buckets[category] ?? [:]
-        var bucket = byAnchor[anchor] ?? Bucket(anchor: anchor, pattern: pattern, provenance: provenance)
+        let anchor = resolution.anchor.isEmpty ? fallbackAnchor : resolution.anchor
+        let key = BucketKey(anchor: anchor, protectionReason: protectionReason)
+
+        var byKey = buckets[resolution.category] ?? [:]
+        var bucket = byKey[key] ?? Bucket(
+            anchor: anchor,
+            protectionReason: protectionReason,
+            pattern: protectionReason == nil ? (resolution.pattern ?? fallbackPattern) : nil,
+            provenance: protectionReason == nil ? resolution.provenance : .undeclared
+        )
         bucket.bytes += bytes
         bucket.fileCount += 1
-        byAnchor[anchor] = bucket
-        buckets[category] = byAnchor
+        byKey[key] = bucket
+        buckets[resolution.category] = byKey
+    }
+
+    /// 相对路径 → 内置受保护条目名（未命中为 `nil`）。**只看这条路径本身。**
+    ///
+    /// 复用 M1 的 `BuiltInProtectedPaths`，**按链接真实目标**判定（PRD §8.2 / §14.5）。
+    /// 它只展开规则声明的工具根，不列举主目录（issue #19）。
+    func protectionReason(forRelativePath relativePath: String) -> String? {
+        protectionReason(
+            forPath: PathText.appending(relativePath, to: toolRoot),
+            relativePath: relativePath
+        )
+    }
+
+    /// 绝对路径的内置受保护判定；`relativePath` 只用于保证判定确实落在工具根内。
+    func protectionReason(forPath path: String, relativePath: String) -> String? {
+        guard !relativePath.isEmpty,
+              PathText.isInside(path, root: toolRoot)
+        else { return nil }
+        return BuiltInProtectedPaths.protection(
+            forPath: path,
+            underToolRoot: toolRoot,
+            homeDirectory: homeDirectory,
+            listing: protectedPathListing
+        )?.ruleIdentifier
+    }
+
+    /// **目录**这一层是否直接命中受保护条目。
+    ///
+    /// 必须与 `protectionReason(forRelativePath:)` 区分开：后者连「目录里有个 `auth.json`」
+    /// 都会命中（文件级条目按最后一段比较，对任何相对路径都成立），于是整棵子树会被
+    /// 判成受保护——那是错的。目录这一层只认能形容目录本身的条目：目录型条目
+    /// （`skills*`、`.agents/skills*`）与真正的目录路径。
+    func directoryProtectionReason(forRelativePath relativePath: String) -> String? {
+        guard !relativePath.isEmpty else { return nil }
+        guard let reason = protectionReason(forRelativePath: relativePath) else { return nil }
+        let last = PathText.components(of: relativePath).last ?? relativePath
+        let isDirectoryRule = BuiltInProtectedPaths.rules.contains { rule in
+            rule.kind == .directory && PathText.matches(pattern: rule.pattern, component: last)
+        }
+        return isDirectoryRule ? reason : nil
     }
 
     private mutating func recordUnfollowedLink(path: String, relativePath: String, destination: String?) {
-        let resolved: String?
-        if let destination {
-            resolved = destination.hasPrefix("/")
-                ? PathText.normalize(destination)
-                : PathText.normalize(PathText.parent(of: path) + "/" + destination)
-        } else {
-            resolved = nil
-        }
+        let resolved = resolvedLinkDestination(path: path, destination: destination)
         unfollowedLinks.append(UnfollowedLink(
             path: path,
             relativePath: relativePath,
@@ -349,6 +451,13 @@ private struct DirectoryWalk {
             destination: destination,
             isInsideToolRoot: resolved.map { PathText.isInside($0, root: toolRoot) } ?? false
         ))
+    }
+
+    /// 把链接目标解成绝对路径（相对目标按链接所在目录解释）。读不到目标时为 `nil`。
+    private func resolvedLinkDestination(path: String, destination: String?) -> String? {
+        guard let destination else { return nil }
+        if destination.hasPrefix("/") { return PathText.normalize(destination) }
+        return PathText.normalize(PathText.appending(destination, to: PathText.parent(of: path)))
     }
 
     // MARK: 读取助手
@@ -373,12 +482,13 @@ private struct DirectoryWalk {
 
     var report: ToolScanReport {
         let categories = DataCategory.displayOrder.compactMap { category -> CategoryOccupancy? in
-            guard let byAnchor = buckets[category], !byAnchor.isEmpty else { return nil }
-            let summaries = byAnchor.values
+            guard let byKey = buckets[category], !byKey.isEmpty else { return nil }
+            let summaries = byKey.values
                 .map { bucket -> CategorySummary in
                     CategorySummary(
                         subpath: bucket.anchor,
                         pattern: bucket.pattern,
+                        protectionReason: bucket.protectionReason,
                         provenance: bucket.provenance,
                         occupancy: Occupancy(bytes: bucket.bytes, fileCount: bucket.fileCount)
                     )
@@ -465,24 +575,43 @@ private struct CategoryResolver {
     }
 
     /// 判定一条相对路径的类别。
+    ///
+    /// - Parameter protection: 内置受保护判定（`BuiltInProtectedPaths`）。路径是**目录**
+    ///   时在规则判定之前先过它：受保护是「禁止归档、禁止移除」的硬约束（GLOSSARY），
+    ///   规则只能抬高不能降低，因此它的结论优先。核心受保护对象是目录（`skills/`、
+    ///   `statsig/`、`staging/`），文件则在本层由调用方单独判定。
     func resolve(
         relativePath: String,
         inherited: DataCategory,
         anchor: String,
-        anchorIsFixed: Bool
+        anchorIsFixed: Bool,
+        protection: (String) -> ProtectedPathMatch?
     ) -> Resolution {
+        if let protected = protection(relativePath) {
+            return Resolution(
+                category: .protected,
+                protectionReason: protected,
+                anchor: relativePath,
+                pattern: nil,
+                provenance: .undeclared,
+                anchorIsFixed: true
+            )
+        }
+
         // 沿「自己 → 父目录 → 更上层」逐级比对，第一层命中的就是锚点。
         //
         //    为什么从最高层往下找：`X/**` 这类声明永远匹配不上 `X` 自己（`**` 至少吃一段），
         //    而它声明的正是「`X` 这一层之下的东西」。`X` 因此要按声明模式的**基**来认
-        //    （`matchesAsDeclaredParent`），否则 `.tmp/stale.dat` 会一路落到「未声明」。
+        //    （`firstDeclaredParentMatch`），否则 `.tmp/stale.dat` 会一路落到「未声明」。
         //    取最高的那一层当锚点，才不会把汇总碎成一堆项目目录名；命中的是哪条声明并不因此
         //    改变（同一层里更具体的先被取到）。
         var prefixes = PathText.components(of: relativePath)
         var matched: (ancestor: String, entry: RankedEntry)?
         while !prefixes.isEmpty, matched == nil {
             let prefix = prefixes.joined(separator: "/")
-            if let entry = firstMatch(prefix) { !$0.isRecursiveWildcard } ?? firstDeclaredParentMatch(prefix) {
+            // 「直接命中一条声明」优先于「正好是某条 `**` 声明的基」。
+            let direct = firstMatch(prefix, where: { !$0.isRecursiveWildcard })
+            if let entry = direct ?? firstDeclaredParentMatch(prefix) {
                 matched = (prefix, entry)
             }
             prefixes.removeLast()
@@ -493,6 +622,7 @@ private struct CategoryResolver {
             let isSelf = matched.ancestor == relativePath
             return Resolution(
                 category: matched.entry.category,
+                protectionReason: nil,
                 anchor: matched.ancestor,
                 pattern: matched.entry.pattern,
                 provenance: isSelf
@@ -510,6 +640,7 @@ private struct CategoryResolver {
 
         return Resolution(
             category: inherited,
+            protectionReason: nil,
             anchor: resolvedAnchor,
             pattern: nil,
             provenance: .undeclared,
@@ -542,8 +673,13 @@ private struct CategoryResolver {
         }
     }
 
+    /// 受保护判定的结果：命中时给出内置条目名，未命中为 `nil`。
+    typealias ProtectedPathMatch = String
+
     struct Resolution {
         let category: DataCategory
+        /// 这一层是受保护目录时，命中的内置条目（`skills`、`statsig`）。仅供说明用。
+        let protectionReason: String?
         let anchor: String
         let pattern: String?
         let provenance: CategoryProvenance
@@ -596,6 +732,44 @@ enum PathText {
         guard components.count > 1 else { return normalized.hasPrefix("/") ? "/" : "" }
         components.removeLast()
         return "/" + components.joined(separator: "/")
+    }
+
+    /// 单段通配符匹配（`*` 匹配任意字符，忽略大小写），与 `PathPattern` 的单段语义一致。
+    ///
+    /// 深扫只需要这一种形态：内置受保护条目的 `pattern` 就是单段通配符
+    /// （`skills*`、`.credentials*`、`*.sqlite*`），而 `PathPattern` 的完整语义
+    /// 由规则层负责，本层不重复实现它。
+    static func matches(pattern: String, component: String) -> Bool {
+        let patternCharacters = Array(pattern.lowercased())
+        let characters = Array(component.lowercased())
+        var patternIndex = 0
+        var componentIndex = 0
+        var lastStarIndex = -1
+        var resumeIndex = 0
+
+        while componentIndex < characters.count {
+            if patternIndex < patternCharacters.count,
+               patternCharacters[patternIndex] == characters[componentIndex] {
+                patternIndex += 1
+                componentIndex += 1
+            } else if patternIndex < patternCharacters.count,
+                      patternCharacters[patternIndex] == "*" {
+                lastStarIndex = patternIndex
+                resumeIndex = componentIndex
+                patternIndex += 1
+            } else if lastStarIndex >= 0 {
+                patternIndex = lastStarIndex + 1
+                resumeIndex += 1
+                componentIndex = resumeIndex
+            } else {
+                return false
+            }
+        }
+
+        while patternIndex < patternCharacters.count, patternCharacters[patternIndex] == "*" {
+            patternIndex += 1
+        }
+        return patternIndex == patternCharacters.count
     }
 
     /// `path` 是否落在 `root` 之内（含等于 root）。
