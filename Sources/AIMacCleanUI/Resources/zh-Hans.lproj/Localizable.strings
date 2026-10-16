@@ -72,3 +72,10 @@
 "discovery.issue.hintsUnavailable" = "关键词 / 负向名单词表这次没读到：%@。没有词表时仍可发现候选，但旧快照与伴生小工具不会被降权。";
 "discovery.issue.storeUnreadable" = "确认记录无法读取：%@。为避免覆盖你已有的判断，本次改动没有保存。";
 "discovery.issue.actionFailed" = "操作没有保存成功：%@";
+
+/* MARK: - 工具分类明细（issue #27；PRD §5.1 四类与处理方式、§9） */
+"classification.fileCount" = "%@ 个文件";
+"classification.category.archivableSession" = "可归档会话";
+"classification.category.cacheAndLog" = "缓存与日志";
+"classification.category.protected" = "受保护";
+"classification.category.uncertain" = "不确定";

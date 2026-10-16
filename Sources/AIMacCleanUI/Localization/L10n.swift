@@ -103,6 +103,13 @@ public enum L10n {
         case discoveryIssueHintsUnavailable = "discovery.issue.hintsUnavailable"
         case discoveryIssueStoreUnreadable = "discovery.issue.storeUnreadable"
         case discoveryIssueActionFailed = "discovery.issue.actionFailed"
+
+        // 工具分类明细（issue #27；PRD §5.1 四类与处理方式、§9）
+        case classificationFileCount = "classification.fileCount"
+        case classificationCategoryArchivableSession = "classification.category.archivableSession"
+        case classificationCategoryCacheAndLog = "classification.category.cacheAndLog"
+        case classificationCategoryProtected = "classification.category.protected"
+        case classificationCategoryUncertain = "classification.category.uncertain"
     }
 
     /// 按当前系统语言取文案，取不到时落到中文。

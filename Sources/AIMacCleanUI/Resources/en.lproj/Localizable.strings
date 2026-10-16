@@ -69,3 +69,10 @@
 "discovery.issue.hintsUnavailable" = "The keyword / negative-name list could not be read: %@. Candidates are still discovered, but old snapshots and companion tools will not be demoted.";
 "discovery.issue.storeUnreadable" = "The confirmation records could not be read: %@. To avoid overwriting your existing decisions, nothing was saved this time.";
 "discovery.issue.actionFailed" = "The action was not saved: %@";
+
+/* Classification detail (issue #27; PRD §5.1 four categories and their handling, §9) */
+"classification.fileCount" = "%@ files";
+"classification.category.archivableSession" = "Archivable sessions";
+"classification.category.cacheAndLog" = "Cache & logs";
+"classification.category.protected" = "Protected";
+"classification.category.uncertain" = "Uncertain";

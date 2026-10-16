@@ -2,6 +2,14 @@ import Foundation
 
 import AIMacCleanRules
 
+/// 四类在**领域层的名字**。
+///
+/// 分类判定的唯一出处是规则层（`AIMacCleanRules.DataCategory`，规则文件不能凭空发明
+/// 新类别，issue #11 把关）；但界面层只依赖 Domain（`DomainLayer` 的边界约定），
+/// 而它要展示的正是四类占用。这里因此把类型名接到领域层：界面可以引用
+/// `DataCategory`，不必 import Rules，也不会顺手去碰规则引擎。
+public typealias DataCategory = AIMacCleanRules.DataCategory
+
 /// 分类在界面与说明里的说法（PRD §5.1「四类与处理方式」）。
 ///
 /// 类别本身是规则层的封闭枚举 `DataCategory`：规则文件不能凭空发明新类别，
