@@ -35,14 +35,19 @@ public extension PathPattern {
     /// 命中与否**一律以权威匹配 `matches(relativePath:)` 为准**：本方法先问它，
     /// 免得逐记号匹配与它各说各话（测试 `test捕获与匹配在实测形状上完全一致` 钉住这点）。
     ///
-    /// ## 边界：字符集重叠的占位段
+    /// ## 边界：字符集重叠的占位段（这条约束是**已定的**，不是待定的取舍）
     ///
     /// 捕获按「贪心」切分：`<ISO>` 这类无界占位段先吃最长合法前缀，再回溯到能让
     /// 其余记号成立的位置。当两个占位段字符集重叠时（Codex fork 文件名的
     /// `<ISO>` 与 `<uuidA>`），切法是**一种**合法解释而不是唯一解释。
-    /// 因此消费者不许用捕获去推断语义关键的分界（会话 ID 见 `SessionGrouper`）；
-    /// 捕获只用来取那些边界由字面量强制确定的段（`projects/<encodedPath>/…`、
-    /// `file-history/<uuid>/…`）。
+    ///
+    /// 因此消费者**不许**用捕获去推断语义关键的分界：会话 ID 的切法在
+    /// `docs/session-grouping.md`「会话 ID 的语义」里已经定死为「文件名里第一个
+    /// UUID 形状记号」，不经过本方法（`fileName` 与 `parentDirectoryName` 两种来源
+    /// 都不走捕获）。捕获只用来取那些边界由**字面量强制确定**的段
+    /// （`projects/<encodedPath>/…`、`file-history/<uuid>/…`，以及
+    /// `sessionKeyedFile` 的 `todos/<uuid>-agent-<uuid>.json`——中间的 `-agent-`
+    /// 把边界钉死了）。
     func captures(relativePath: String) -> [PathPatternCapture]? {
         guard matches(relativePath: relativePath) else { return nil }
 
