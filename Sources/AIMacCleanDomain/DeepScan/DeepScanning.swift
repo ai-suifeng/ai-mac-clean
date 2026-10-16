@@ -195,7 +195,10 @@ public struct DeepScanner: DeepScanning, @unchecked Sendable {
                 homeDirectory: homeDirectory
             )
             walk.run()
-            roots.append(ToolRootOccupancy(path: root.path, role: root.role, occupancy: walk.occupancy))
+            // 缺失的根不算「这个工具占用的贡献者」：它不进报告的分根清单（PRD §5.4 静默跳过）。
+            if walk.isPresentOnDisk {
+                roots.append(ToolRootOccupancy(path: root.path, role: root.role, occupancy: walk.occupancy))
+            }
             mergeBuckets(walk.buckets, into: &merged)
             unreadable += walk.unreadable
             unfollowedLinks += walk.unfollowedLinks
@@ -350,6 +353,13 @@ private struct DirectoryWalk {
     var unreadable: [UnreadableEntry] = []
     var unfollowedLinks: [UnfollowedLink] = []
 
+    /// 这个根在磁盘上**在不在**（issue #31）。
+    ///
+    /// 主工具根永远是「在」——它是用户确认过的扫描原点，读不到由 `unreadable` 如实说明。
+    /// 仅展示根缺失时置 `false`：它不被算作这个工具占用的贡献者（PRD §5.4 静默跳过），
+    /// 因此不进 `ToolScanReport.roots`。
+    var isPresentOnDisk = true
+
     init(
         tool: ConfirmedTool,
         root: ScanRoot,
@@ -388,8 +398,16 @@ private struct DirectoryWalk {
     /// 缺失时**静默跳过**：规则声明的路径不存在只说明这台机器上没有这个东西
     /// （PRD §5.4「规则命中路径不存在时静默跳过，不得报错」），不影响主根统计，
     /// 也不在「读不到」清单里留一条——它不是读不到，是没有。
+    /// 仅展示根（issue #31）。
+    ///
+    /// 缺失时**静默跳过**：规则声明的路径不存在只说明这台机器上没有这个东西
+    /// （PRD §5.4「规则命中路径不存在时静默跳过，不得报错」），不影响主根统计，
+    /// 也不在「读不到」清单里留一条——它不是读不到，是没有。
     private mutating func runDisplayOnlyRoot() {
-        guard let attributes = fileSystem.attributes(ofItemAt: rootPath) else { return }
+        guard let attributes = fileSystem.attributes(ofItemAt: rootPath) else {
+            isPresentOnDisk = false
+            return
+        }
 
         guard let type = attributes[.type] as? FileAttributeType else {
             unreadable.append(UnreadableEntry(

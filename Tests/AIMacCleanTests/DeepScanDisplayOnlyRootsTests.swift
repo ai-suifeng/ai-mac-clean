@@ -156,4 +156,39 @@ final class DeepScanDisplayOnlyRootsTests: XCTestCase {
             "总占用 = 主根 + 仅展示根"
         )
     }
+
+    // MARK: - 验收 4：仅展示根缺失时静默跳过
+
+    func test仅展示根缺失时静默跳过且不影响主根() throws {
+        let fixture = try DeepScanFixture(named: "display-only-missing")
+        defer { fixture.remove() }
+
+        let cursor = try cursorTool(fixture, classificationJSON: [archivable])
+        try fixture.write(".cursor/projects/p/a.jsonl", bytes: 1000)
+        // 规则声明的仅展示根在这台机器上不存在：没装那个组件，或工具的路径形态变了。
+        // 规则命中路径不存在时静默跳过，不得报错（PRD §5.4「规则容忍缺失」）。
+
+        let scan = scan(RecordingDiscoveryFileSystem(), fixture, cursor)
+        let report = try XCTUnwrap(scan.toolReport(id: "cursor"))
+
+        XCTAssertEqual(
+            report.occupancy,
+            Occupancy(bytes: 1000, fileCount: 1),
+            "缺失的仅展示根不贡献占用，也一点都不影响主根统计"
+        )
+        XCTAssertEqual(report.toolRootOccupancy, Occupancy(bytes: 1000, fileCount: 1))
+        XCTAssertEqual(report.displayOnlyOccupancy, Occupancy())
+        XCTAssertEqual(
+            report.roots.map(\.path),
+            [cursor.rootPath],
+            "缺失的根不是这个工具占用的贡献者，因此不进报告"
+        )
+        XCTAssertEqual(
+            report.unreadable,
+            [],
+            "缺失不是「读不到」：静默跳过，不往读不到清单里塞一条（PRD §5.4）"
+        )
+        XCTAssertEqual(report.unfollowedLinks, [])
+        XCTAssertEqual(scan.totalOccupancy, Occupancy(bytes: 1000, fileCount: 1))
+    }
 }
