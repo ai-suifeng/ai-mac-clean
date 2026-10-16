@@ -52,13 +52,24 @@ public enum ClassificationDetailPresenter {
             )
         }
 
+        // 可归档占比：这是 PRD §9 要求如实给出的那个数（§14.1 的 Claude Code 只有 0.14%）。
+        // 占比极小时给一句标注——但**不**用大字号、**不**换算成「能腾出多少」，
+        // 更不出现任何压缩率估算（那是 M3）。
+        let archivableShare = share(of: report.archivableOccupancy.bytes, totalBytes: totalBytes)
+        let isTinyShare = totalBytes > 0 && archivableShare < tinyArchivableShareThreshold
+
         return ToolClassificationDetail(
             toolID: report.toolID,
             displayName: report.displayName,
             rootDisplayPath: ToolRootDisplay.abbreviated(report.toolRootPath, homeDirectory: homeDirectory),
             totalSizeText: report.occupancy.sizeText,
             totalFileCountText: fileCountText(report.occupancy.fileCount, language: language),
-            categoryRows: rows
+            categoryRows: rows,
+            archivableShareText: percentText(archivableShare),
+            isArchivableShareTiny: isTinyShare,
+            tinyArchivableShareNotice: isTinyShare
+                ? L10n.text(.classificationArchivableShareTiny, language: language)
+                : nil
         )
     }
 
@@ -163,6 +174,15 @@ public struct ToolClassificationDetail: Equatable, Identifiable {
     /// 四类的明细行，按 PRD §5.1 顺序；本工具下没有数据的类别不出现。
     public let categoryRows: [ClassificationCategoryRow]
 
+    /// 可归档占比的展示文案（`0.14%`）：可归档字节 ÷ 本工具总占用。
+    public let archivableShareText: String
+
+    /// 可归档占比是否低于「极小」阈值（PRD §9）。
+    public let isArchivableShareTiny: Bool
+
+    /// 可归档占比极小时的如实标注；正常占比时为 `nil`（界面上不出现任何相关话术）。
+    public let tinyArchivableShareNotice: String?
+
     public var id: String { toolID }
 
     public init(
@@ -171,7 +191,10 @@ public struct ToolClassificationDetail: Equatable, Identifiable {
         rootDisplayPath: String,
         totalSizeText: String,
         totalFileCountText: String,
-        categoryRows: [ClassificationCategoryRow]
+        categoryRows: [ClassificationCategoryRow],
+        archivableShareText: String,
+        isArchivableShareTiny: Bool,
+        tinyArchivableShareNotice: String?
     ) {
         self.toolID = toolID
         self.displayName = displayName
@@ -179,6 +202,9 @@ public struct ToolClassificationDetail: Equatable, Identifiable {
         self.totalSizeText = totalSizeText
         self.totalFileCountText = totalFileCountText
         self.categoryRows = categoryRows
+        self.archivableShareText = archivableShareText
+        self.isArchivableShareTiny = isArchivableShareTiny
+        self.tinyArchivableShareNotice = tinyArchivableShareNotice
     }
 
     /// 取某一类的明细行；本工具下没有该类数据时返回 `nil`。

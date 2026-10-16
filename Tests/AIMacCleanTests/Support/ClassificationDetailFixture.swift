@@ -100,6 +100,14 @@ enum ClassificationDetailFixture {
         )
     }
 
+    /// 一台只有「可归档 + 受保护」两类的工具，用来量可归档占比的阈值。
+    static func tool(archivableBytes: Int64, protectedBytes: Int64) -> ToolScanReport {
+        report(categories: [
+            category(.archivableSession, bytes: archivableBytes, files: 1),
+            category(.protected, bytes: protectedBytes, files: 1),
+        ])
+    }
+
     /// PRD §14.1 的 Claude Code：四类齐全，受保护是大头。
     static func claudeCode() -> ToolScanReport {
         report(categories: [

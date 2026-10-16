@@ -81,3 +81,5 @@
 "classification.handling.cacheAndLog" = "Shown only, never touched";
 "classification.handling.protected" = "Never touched, shown only";
 "classification.handling.uncertain" = "Locked, size shown only";
+"classification.archivableShare.label" = "Archivable share %@";
+"classification.archivableShare.tiny" = "Very little of this is archivable: almost none of this tool's usage is in the archivable category, so archiving it would free little space.";

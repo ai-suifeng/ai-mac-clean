@@ -91,4 +91,50 @@ final class ClassificationDetailPresentationTests: XCTestCase {
             "类别口径仍按 PRD §5.1；「现在就能归档」的误解由阶段说明挡住"
         )
     }
+
+    // MARK: - 验收 3：可归档占比极小的如实标注（PRD §9、§14.1）
+
+    func test可归档占比极小时出现如实标注正常占比时不出现() {
+        // PRD §14.1 的 Claude Code：可归档 404K / 277M = 0.14%。
+        let claudeCode = detail(ClassificationDetailFixture.claudeCode())
+        XCTAssertEqual(claudeCode.archivableShareText, "0.14%")
+        XCTAssertTrue(claudeCode.isArchivableShareTiny)
+        XCTAssertEqual(
+            claudeCode.tinyArchivableShareNotice,
+            "可归档占比极小：这个工具的占用几乎都不在可归档范围内，归档它不会释放多少空间。"
+        )
+
+        // 正常占比（Codex 形状：可归档是大头）不出现任何标注。
+        let codex = detail(
+            ClassificationDetailFixture.tool(archivableBytes: ClassificationDetailFixture.bytes(292),
+                                              protectedBytes: ClassificationDetailFixture.bytes(195))
+        )
+        XCTAssertEqual(codex.archivableShareText, "59.96%")
+        XCTAssertFalse(codex.isArchivableShareTiny)
+        XCTAssertNil(codex.tinyArchivableShareNotice)
+
+        // 阈值边界：正好 1% 不算极小，差一个字节才算（阈值是严格小于）。
+        let exactlyOnePercent = detail(
+            ClassificationDetailFixture.tool(archivableBytes: ClassificationDetailFixture.bytes(1),
+                                              protectedBytes: ClassificationDetailFixture.bytes(99))
+        )
+        XCTAssertEqual(exactlyOnePercent.archivableShareText, "1%")
+        XCTAssertFalse(exactlyOnePercent.isArchivableShareTiny)
+
+        let justUnder = detail(
+            ClassificationDetailFixture.tool(archivableBytes: ClassificationDetailFixture.bytes(1) - 1,
+                                              protectedBytes: ClassificationDetailFixture.bytes(99))
+        )
+        XCTAssertTrue(justUnder.isArchivableShareTiny)
+        XCTAssertNotNil(justUnder.tinyArchivableShareNotice)
+    }
+
+    func test完全空的工具不出现极小占比标注() {
+        // 一个字节都没有的工具不该被念一句「可归档占比极小」——那是在提醒一件不存在的事。
+        let empty = detail(ClassificationDetailFixture.report(categories: []))
+        XCTAssertEqual(empty.archivableShareText, "0%")
+        XCTAssertFalse(empty.isArchivableShareTiny)
+        XCTAssertNil(empty.tinyArchivableShareNotice)
+        XCTAssertTrue(empty.categoryRows.isEmpty, "没有数据的类别不留占位空行")
+    }
 }

@@ -115,6 +115,8 @@ public enum L10n {
         case classificationHandlingCacheAndLog = "classification.handling.cacheAndLog"
         case classificationHandlingProtected = "classification.handling.protected"
         case classificationHandlingUncertain = "classification.handling.uncertain"
+        case classificationArchivableShareLabel = "classification.archivableShare.label"
+        case classificationArchivableShareTiny = "classification.archivableShare.tiny"
     }
 
     /// 按当前系统语言取文案，取不到时落到中文。

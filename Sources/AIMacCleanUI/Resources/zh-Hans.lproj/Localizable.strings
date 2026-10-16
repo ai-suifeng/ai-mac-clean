@@ -84,3 +84,5 @@
 "classification.handling.cacheAndLog" = "只展示大小，不动";
 "classification.handling.protected" = "永不触碰，仅展示";
 "classification.handling.uncertain" = "锁定，仅展示大小";
+"classification.archivableShare.label" = "可归档占比 %@";
+"classification.archivableShare.tiny" = "可归档占比极小：这个工具的占用几乎都不在可归档范围内，归档它不会释放多少空间。";
