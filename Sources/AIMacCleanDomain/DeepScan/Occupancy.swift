@@ -38,6 +38,13 @@ public struct Occupancy: Equatable, Hashable, Sendable, Comparable {
     /// 是否什么都没占（既没有字节也没有文件）。
     public var isEmpty: Bool { bytes == 0 && fileCount == 0 }
 
+    /// 占用的尺寸展示文案（`247 MB`）。
+    ///
+    /// 界面层只依赖 Domain、不直接引 Core，因此尺寸格式化从领域层出口出去；
+    /// 底下仍然是全应用唯一的 `ByteSizeFormatter`（PRD §9「大小统一用 ByteCountFormatter」），
+    /// 界面不另写一套格式化。
+    public var sizeText: String { ByteSizeFormatter.string(from: bytes) }
+
     /// 排序先比字节、再比文件数；相同即相等。
     public static func < (lhs: Occupancy, rhs: Occupancy) -> Bool {
         if lhs.bytes != rhs.bytes { return lhs.bytes < rhs.bytes }
