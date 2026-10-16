@@ -69,6 +69,7 @@ public struct OverviewView: View {
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(model.state.isScanning)
                 .accessibilityLabel(model.reloadTitle)
+                .accessibilityHint(model.reloadShortcutText)
         }
     }
 

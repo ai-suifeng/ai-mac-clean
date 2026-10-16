@@ -226,6 +226,17 @@ final class OverviewPageModelTests: XCTestCase {
         XCTAssertEqual(codex.archivableText, "可归档 1 MB（50%）")
     }
 
+    // MARK: - 键盘可达
+
+    func test重新扫描有键盘入口() throws {
+        // 视图把它挂在「重新扫描」按钮上（⌘R），键盘与鼠标走同一个 `reload()`。
+        let (model, _, fixture) = try makeModel()
+        defer { fixture.remove() }
+
+        XCTAssertEqual(model.reloadShortcutText, "⌘R")
+        XCTAssertEqual(model.reloadTitle, "重新扫描")
+    }
+
     // MARK: - 验收 4：主按钮不可用并说明原因
 
     func test开始归档按钮不可用并给出原因() throws {

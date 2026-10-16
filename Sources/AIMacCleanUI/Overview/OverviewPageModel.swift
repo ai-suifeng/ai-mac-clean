@@ -138,6 +138,13 @@ public final class OverviewPageModel: ObservableObject {
     public var toolSectionTitle: String { L10n.text(.overviewSectionTools) }
     public var scanningText: String? { state.isScanning ? L10n.text(.overviewScanning) : nil }
 
+    /// 「重新扫描」的键盘快捷键说明。视图把它挂到按钮上，键盘与鼠标走的是同一个动作
+    /// （`reload()`），因此不存在两套语义。与发现与确认页一致用 ⌘R。
+    public var reloadShortcutText: String { Self.reloadShortcut }
+
+    /// ⌘R：重新扫描。
+    static let reloadShortcut = "⌘R"
+
     // MARK: - 数字（验收 1、2）
 
     /// 总占用文案；还没有结果或空状态时为 `nil`（宁可什么都不显示，也不显示 0）。
