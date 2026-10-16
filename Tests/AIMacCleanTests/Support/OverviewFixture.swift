@@ -37,6 +37,23 @@ struct StubCapacityReader: VolumeCapacityReading {
     func capacity(ofVolumeContaining path: String) -> VolumeCapacity { reading }
 }
 
+/// 记录「被问的是哪个卷」的容量读数（ticket #24：读的是已确认工具所在的卷）。
+final class RecordingCapacityReader: VolumeCapacityReading {
+
+    private(set) var requestedPaths: [String] = []
+
+    let reading: VolumeCapacity
+
+    init(reading: VolumeCapacity = .measured(availableBytes: 1_024, totalBytes: 2_048)) {
+        self.reading = reading
+    }
+
+    func capacity(ofVolumeContaining path: String) -> VolumeCapacity {
+        requestedPaths.append(path)
+        return reading
+    }
+}
+
 /// 概览页夹具：临时目录上的确认存储（不为持久化单开 seam）+ 构造报告的小工具。
 final class OverviewPageFixture {
 

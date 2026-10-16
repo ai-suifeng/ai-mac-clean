@@ -114,7 +114,12 @@ public final class OverviewPageModel: ObservableObject {
             guard let self else { return }
             let report = self.scanner.scan(records)
             // 容量与深扫在同一段后台工作里读：界面线程上只剩「换状态」。
-            let capacity = self.capacityReader.capacity(ofVolumeContaining: self.homeDirectory)
+            //
+            // 读的是**已确认工具所在的卷**（ticket #24）：数据在哪个卷上，剩余空间就得读哪个卷，
+            // 否则工具根与主目录跨卷时界面会给另一个卷的数字。第一个已确认工具根（排序后，
+            // 结果确定）就是那个卷；没有已确认工具时退回主目录——空状态下仍要给得出这一行。
+            let capacityPath = toolRootPaths.first ?? self.homeDirectory
+            let capacity = self.capacityReader.capacity(ofVolumeContaining: capacityPath)
             self.scheduler.runOnMain { [weak self] in
                 guard let self else { return }
                 self.state.report = report

@@ -346,4 +346,54 @@ final class OverviewPageModelTests: XCTestCase {
 
         XCTAssertEqual(model.freeSpaceText, "磁盘剩余空间：0 B（共 1 TB）")
     }
+
+    // MARK: - 验收 7 / ticket #24：容量读的是「已确认工具所在的卷」
+
+    /// ticket #24 把读数范围钉在「已确认工具所在的卷」：数据在哪个卷上，剩余空间就得读哪个卷。
+    /// 此前读的是主目录——工具根与主目录跨卷时，界面会给出另一个卷的数字。
+    func test容量读的是已确认工具所在的卷而不是主目录() throws {
+        let fixture = try OverviewPageFixture(named: "overview-capacity-volume")
+        defer { fixture.remove() }
+
+        // 两台工具：排序后 `.codex` 在前（结果不随确认顺序变）。
+        try fixture.confirm(id: "cursor", root: fixture.toolRoot(".cursor"))
+        try fixture.confirm(id: "codex-cli", root: fixture.toolRoot(".codex"))
+
+        let reader = RecordingCapacityReader()
+        let model = OverviewPageModel(
+            store: fixture.store,
+            scanner: StubOccupancyScanner(report: OverviewFixture.report([])),
+            capacityReader: reader,
+            homeDirectory: fixture.homePath,
+            scheduler: .immediate
+        )
+        model.load()
+
+        XCTAssertEqual(
+            reader.requestedPaths,
+            [fixture.toolRoot(".codex")],
+            "读第一个已确认工具根所在的卷（确定、可复现），而不是主目录"
+        )
+        XCTAssertNotEqual(reader.requestedPaths.first, fixture.homePath)
+    }
+
+    /// 没有已确认工具（空状态）时没有「工具所在的卷」可读：退回主目录，
+    /// 空状态下仍然给得出磁盘剩余空间那一行。
+    func test没有已确认工具时容量退回主目录() throws {
+        let fixture = try OverviewPageFixture(named: "overview-capacity-no-tools")
+        defer { fixture.remove() }
+
+        let reader = RecordingCapacityReader()
+        let model = OverviewPageModel(
+            store: fixture.store,
+            scanner: StubOccupancyScanner(report: OverviewFixture.report([])),
+            capacityReader: reader,
+            homeDirectory: fixture.homePath,
+            scheduler: .immediate
+        )
+        model.load()
+
+        XCTAssertEqual(reader.requestedPaths, [fixture.homePath], "没有工具时退回主目录")
+        XCTAssertTrue(model.isEmpty)
+    }
 }
