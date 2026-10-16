@@ -21,7 +21,6 @@ final class DeepScanBundledRuleTests: XCTestCase {
         defer { fixture.remove() }
 
         let rules = try admittedBundledRules()
-        let byID = Dictionary(rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         // MARK: Claude Code（`~/.claude`）
         try fixture.write(".claude/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 400)
@@ -226,5 +225,66 @@ final class DeepScanBundledRuleTests: XCTestCase {
         )
         XCTAssertEqual(report.category(.uncertain)?.occupancy, Occupancy(bytes: 100, fileCount: 1))
         XCTAssertEqual(report.category(.uncertain)?.summaries.first?.provenance, .undeclared)
+    }
+
+    /// ticket #31 的 `~/.claude.json`：claude-code 声明为**文件形态**的仅展示根。
+    ///
+    /// `docs/rule-format.md` 承诺文件形态的根「照样进占用」，但规则此前只声明了
+    /// `~/.claude`，这个文件从来没进过任何工具的占用。它同样是**受保护**的
+    /// （内置条目 `home/claude-state`），因此必须出现占用的受保护那一类里、
+    /// 可归档为 0（displayOnly 根内的路径一律不可归档）。
+    func test出厂规则把主目录的claude状态文件作为文件形态的仅展示根计入占用() throws {
+        let fixture = try DeepScanFixture(named: "bundled-file-root")
+        defer { fixture.remove() }
+
+        try fixture.write(".claude/projects/-Users-x-a/11111111-1111-1111-1111-111111111111.jsonl", bytes: 400)
+        // `~/.claude.json`：主目录下的跨工具状态文件（内置条目 home/claude-state）。
+        try fixture.write(".claude.json", bytes: 1234)
+
+        let auditor = AuditorFileSystem()
+        let scan = DeepScanner(fileSystem: auditor).scan(
+            tools: [
+                ConfirmedTool(
+                    id: "claude-code",
+                    displayName: "Claude Code",
+                    toolRootPath: fixture.rootPath + "/.claude"
+                )
+            ],
+            rules: try admittedBundledRules(),
+            homeDirectory: fixture.rootPath
+        )
+
+        let claude = try XCTUnwrap(scan.toolReport(id: "claude-code"))
+        XCTAssertEqual(
+            claude.category(.protected)?.occupancy,
+            Occupancy(bytes: 1234, fileCount: 1),
+            "`~/.claude.json` 的字节要进占用，并且是受保护那一类"
+        )
+        XCTAssertEqual(
+            claude.category(.protected)?.summaries.first?.protectionReason,
+            "home/claude-state",
+            "保护来自内置清单，不靠规则声明"
+        )
+        XCTAssertEqual(
+            claude.archivableOccupancy,
+            Occupancy(bytes: 400, fileCount: 1),
+            "文件形态的仅展示根绝不算可归档（只有主根里的转录可归档）"
+        )
+        XCTAssertEqual(
+            claude.displayOnlyOccupancy,
+            Occupancy(bytes: 1234, fileCount: 1),
+            "它算「仅展示」的那一份，概览页据此分列"
+        )
+        XCTAssertEqual(
+            claude.roots.map(\.role),
+            [.toolRoot, .displayOnly],
+            "主根在前，规则声明的文件形态仅展示根在后"
+        )
+        XCTAssertEqual(
+            claude.roots.map(\.path),
+            [fixture.rootPath + "/.claude", fixture.rootPath + "/.claude.json"],
+            "规则里的 `~/.claude.json` 展开到 homeDirectory"
+        )
+        XCTAssertEqual(auditor.writeAttempts, [], "深扫全程零写入：\n\(auditor.writeSummary)")
     }
 }

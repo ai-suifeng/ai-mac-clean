@@ -80,13 +80,14 @@ final class DeepScanProtectedPathTests: XCTestCase {
         XCTAssertEqual(auditor.writeAttempts, [], "深扫全程零写入，实际：\n\(auditor.writeSummary)")
     }
 
-    // MARK: - 受保护判定按链接真实目标（PRD §8.2 / §14.5）
+    // MARK: - 受保护判定按链接真实目标，但链接目标绝不进占用（spec #22）
 
-    /// `~/.codex/skills → ~/.agents/skills` 形态（PRD §14.5）：
-    /// 链接的真实目标是内置清单里的受保护目录，因此
-    /// **计进受保护**（界面上要能说「这里有一份技能，碰不得」），
-    /// 但**进程不跟着链接跑**——目标在工具根之外，工具根的占用里没有它。
-    func test指向受保护技能目录的符号链接计进受保护而不混进工具根占用() throws {
+    /// `~/.codex/skills → ~/.agents/skills` 形态（PRD §14.5、spec #22）：
+    /// 链接的真实目标是内置清单里的受保护目录，因此**这条链接判为受保护**
+    /// （界面上要能说「这里有一份技能，碰不得」），但**绝不跟随**——
+    /// 目标一个字节都不进这台工具的占用，也不被遍历/列举
+    /// （issue #23 验收 4「既不把链接目标算进占用，也不进链接目标遍历」）。
+    func test指向受保护技能目录的符号链接判为受保护但零占用且不被遍历() throws {
         let fixture = try DeepScanFixture(named: "skills-symlink")
         defer { fixture.remove() }
 
@@ -117,43 +118,45 @@ final class DeepScanProtectedPathTests: XCTestCase {
 
         let report = try XCTUnwrap(scan.toolReports.first)
 
-        // 验收 4 的前半：链接目标的 200 字节算进**受保护**，绝不混进可归档。
+        // 链接目标的 200 字节**一个都不进占用**（spec #22：绝不把链接目标算进工具占用）。
+        XCTAssertEqual(
+            report.occupancy,
+            Occupancy(bytes: 512, fileCount: 1),
+            "这台工具只占它自己根里的 512 字节；`~/.agents/skills` 的 200 字节不属于它"
+        )
+        XCTAssertNil(
+            report.category(.protected),
+            "链接贡献零字节零文件：受保护判定不是占用"
+        )
         XCTAssertEqual(
             report.category(.archivableSession)?.occupancy,
             Occupancy(bytes: 512, fileCount: 1),
             "受保护的技能一个字节都不许混进可归档"
         )
-        XCTAssertEqual(
-            report.category(.protected)?.occupancy,
-            Occupancy(bytes: 200, fileCount: 1),
-            "受保护目标计进受保护：界面上要能如实说「这里有一份技能」"
-        )
-        XCTAssertEqual(report.category(.protected)?.summaries.map(\.subpath), ["skills"])
-        XCTAssertEqual(
-            report.category(.protected)?.summaries.first?.protectionReason,
-            "home/shared-skills",
-            "说明它是内置清单判出来的，而不是规则声明的"
-        )
 
-        // 验收 4 的后半：链接本身被记下来，并标明它指向工具根之外。
+        // 链接仍被**判为受保护**（PRD A3/A8：`~/.codex/skills` 是碰不得的技能）。
         XCTAssertEqual(report.unfollowedLinks.map(\.relativePath), ["skills"])
         XCTAssertEqual(report.unfollowedLinks.first?.isInsideToolRoot, false)
-
-        // 关键：没有「跟着链接跑」——目标里只读了一层（枚举 + 逐个 stat），
-        // 没有继续向更深处递归，也没有把目标当成工具根的一部分去遍历。
-        let listedTarget = fixture.root.appendingPathComponent(".agents/skills").path
         XCTAssertEqual(
-            recorder.accesses.filter { if case .listed = $0 { return true } else { return false } }
-                .map(\.path)
-                .filter { $0.hasPrefix(fixture.rootPath + "/.agents") },
-            [listedTarget],
-            "受保护目标只该被列举一层。实际：\n\(recorder.summary)"
+            report.unfollowedLinks.first?.protectionReason,
+            "home/shared-skills",
+            "按链接的**真实目标**判受保护（PRD §8.2 / §14.5）"
+        )
+        XCTAssertEqual(report.unfollowedLinks.first?.isProtected, true)
+
+        // 关键：没有「跟着链接跑」——目标目录一次都没被列举或查属性。
+        XCTAssertEqual(
+            recorder.touched(underOrEqual: fixture.rootPath + "/.agents"),
+            [],
+            "受保护目标零访问：既不列举，也不递归。实际：\n\(recorder.summary)"
         )
     }
 
     // MARK: - 规则没声明、但真实目标受保护
 
-    func test规则未声明而真实目标落在受保护目录之下的路径算受保护() throws {
+    /// 链接自身的位置没有任何声明，但它的**真实目标**落在受保护目录之下：
+    /// 判定上仍算受保护（PRD A3/A8），占用上仍是零（spec #22）。
+    func test规则未声明而真实目标落在受保护目录之下的链接判为受保护且零占用() throws {
         let fixture = try DeepScanFixture(named: "protected-real-target")
         defer { fixture.remove() }
 
@@ -173,23 +176,39 @@ final class DeepScanProtectedPathTests: XCTestCase {
             to: fixture.root.appendingPathComponent(".agents/skills").path
         )
 
-        let scan = makeScanner(RecordingDiscoveryFileSystem()).scan(
+        let recorder = RecordingDiscoveryFileSystem()
+        let scan = makeScanner(recorder).scan(
             tools: [fixture.confirmed(harness)],
             rules: [harness.rule],
             homeDirectory: fixture.rootPath
         )
 
         let report = try XCTUnwrap(scan.toolReports.first)
-        XCTAssertEqual(
-            report.category(.protected)?.occupancy,
-            Occupancy(bytes: 300, fileCount: 1),
-            "真实目标落在受保护目录之下 → 受保护（PRD §8.2 的同一条纪律）"
+        XCTAssertNil(
+            report.category(.protected),
+            "真实目标的 300 字节不进占用：受保护判定与占用是两件事（spec #22）"
         )
-        XCTAssertEqual(report.category(.protected)?.summaries.map(\.subpath), ["mystery"])
+        XCTAssertEqual(
+            report.occupancy,
+            Occupancy(bytes: 8, fileCount: 1),
+            "这台工具只占 `sessions/session.jsonl.zstd` 的 8 字节"
+        )
+        XCTAssertEqual(report.unfollowedLinks.map(\.relativePath), ["mystery"])
+        XCTAssertEqual(report.unfollowedLinks.first?.isInsideToolRoot, false)
+        XCTAssertEqual(
+            report.unfollowedLinks.first?.protectionReason,
+            "home/shared-skills",
+            "链接自身没被声明，但真实目标落在受保护目录之下 → 仍判为受保护（PRD §8.2）"
+        )
         XCTAssertEqual(
             report.category(.uncertain)?.summaries.map(\.subpath),
             ["sessions"],
             "sessions 没被任何声明覆盖 → 不确定，不许因为规则没写就悄悄算成可归档"
+        )
+        XCTAssertEqual(
+            recorder.touched(underOrEqual: fixture.rootPath + "/.agents"),
+            [],
+            "受保护目标零访问。实际：\n\(recorder.summary)"
         )
     }
 
@@ -230,6 +249,10 @@ final class DeepScanProtectedPathTests: XCTestCase {
         )
         XCTAssertEqual(report.unfollowedLinks.map(\.relativePath), ["sessions/movies"])
         XCTAssertEqual(report.unfollowedLinks.first?.isInsideToolRoot, false)
+        XCTAssertNil(
+            report.unfollowedLinks.first?.protectionReason,
+            "不受保护的链接不谎称受保护（记录要如实）"
+        )
         XCTAssertEqual(
             recorder.touched(underOrEqual: fixture.rootPath + "/movies"),
             [],

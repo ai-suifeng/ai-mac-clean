@@ -41,8 +41,8 @@ final class DeepScanningTests: XCTestCase {
         let found = report.category(category)?.summaries.first { $0.subpath == subpath }
         if found == nil {
             XCTFail(
-                "没找到「\(category.displayName) / \(subpath)」这条汇总。"
-                    + "实际：\(report.categories.map { "\($0.category.displayName)[\($0.summaries.map(\.subpath))]" })",
+                "没找到「\(category.rawValue) / \(subpath)」这条汇总。"
+                    + "实际：\(report.categories.map { "\($0.category.rawValue)[\($0.summaries.map(\.subpath))]" })",
                 file: file,
                 line: line
             )

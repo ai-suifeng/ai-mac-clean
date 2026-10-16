@@ -81,7 +81,7 @@ final class DeepScanConcurrencyTests: XCTestCase {
         defer { domain.fixture.remove() }
 
         let options = DeepScanOptions(maxConcurrentTools: 4)
-        let runs = try (0..<5).map { _ in
+        let runs = (0..<5).map { _ in
             DeepScanner(fileSystem: RealDiscoveryFileSystem()).scan(
                 tools: domain.inputs(),
                 rules: domain.rules(),

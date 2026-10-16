@@ -3,7 +3,8 @@
   "id": "claude-code",
   "displayName": "Claude Code",
   "roots": [
-    { "path": "~/.claude", "role": "toolRoot" }
+    { "path": "~/.claude", "role": "toolRoot" },
+    { "path": "~/.claude.json", "role": "displayOnly" }
   ],
   "installations": [
     { "path": "~/.claude/local/claude", "kind": "executable" },

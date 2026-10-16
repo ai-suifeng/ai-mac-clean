@@ -193,8 +193,12 @@ report.category(forRelativePath: path, ruleID: id, isBuiltInProtected: isProtect
   （PRD §2.3、§5.4：只展示、绝不动）。
 - **缺失的 `displayOnly` 根静默跳过**：不报错、不进「读不到」清单，也不算这个工具占用的贡献者
   （PRD §5.4「规则容忍缺失」）。
-- **文件形态的根**（`~/.claude.json` 这类）照样进占用，但分类只可能来自内置受保护清单或不确定
+- **文件形态的根**照样进占用，但分类只可能来自内置受保护清单或不确定
   ——规则的模式都相对**根**匹配，某个路径相对它就是它自己，谁也匹配不到它。
+  出厂规则里就有这样一条：claude-code 把 `~/.claude.json` 声明成 `displayOnly` 根，
+  它的字节因此出现在 Claude Code 的占用里（受保护，内置条目 `home/claude-state`），
+  但一个字节都不算可归档。以前只声明 `~/.claude`，这个文件从来没进过任何工具的占用
+  （`DeepScanBundledRuleTests.test出厂规则把主目录的claude状态文件作为文件形态的仅展示根计入占用`）。
 
 ## 自带压缩与会话文件名形态
 
@@ -258,8 +262,12 @@ RuleSetAdmission.rejection(forRule: rule, homeDirectory: home)   // RuleRejectio
 - **占位符按实际取值范围收紧**：`<uuid>` 只可能是十六进制与短横线，`<date:…>` 只可能是数字，
   `<encodedPath>` / `<名字>` 是**不含点**的单段标识符。因此
   `projects/<encodedPath>/<uuid>.jsonl` 不会被内置条目 `claude-code/history` 误伤。
-- **工具根按符号链接的真实目标判定**：`~/.codex/skills` → `~/.agents/skills` 形态下，
-  整棵工具根都是受保护区域（PRD §14.5）。
+- **工具根按符号链接的真实目标判定（准入这一层）**：`~/.codex/skills` → `~/.agents/skills`
+  形态下，链接覆盖的整片区域都算受保护区域，规则不能把它改判成别的类别（PRD §14.5）。
+  到了**深扫 / 占用**这一层则一律**不跟随链接**：链接仍被判定为受保护
+  （`UnfollowedLink.protectionReason`，界面据此说「这里有一份碰不得的技能」），
+  但目标一个字节都不进这台工具的占用，也不被遍历——否则 `~/.agents/skills` 会被同时
+  算进 `~/.codex` 与 `~/.opencode`，概览总数对不上 `du`（spec #22、issue #23 验收 4）。
 - **规则容忍缺失**：声明的路径在磁盘上不存在不是拒绝理由（User Story 22），
   准入判定完全走路径形状、不 stat 磁盘。
 - **拒绝粒度是单条规则**：一条坏规则不会让其余已知工具的规则失效，

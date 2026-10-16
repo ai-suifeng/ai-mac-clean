@@ -56,6 +56,11 @@
 > 为什么不靠模式捕获切这两个 UUID：`<ISO>` 与 `<uuid>` 的字符集重叠
 > （`PathPattern.captures` 里说明了这一点），哪种切法都能自圆其说；
 > 按「文件名里第一个 UUID 形状记号」切只有一个答案。
+>
+> 这条约束是**已定**的，不是待定的取舍：`PathPattern.captures` 的文档把
+> 「消费者不许用捕获推断语义关键的分界」写成硬约束。捕获只用于边界由字面量
+> 强制确定的段（`projects/<encodedPath>/…`、`file-history/<uuid>/…`，以及
+> 级联 `sessionKeyedFile` 里被 `-agent-` 钉死边界的 `todos/<uuid>-agent-<uuid>.json`）。
 
 文件名里没有 UUID 形状记号时（合成夹具里就有这种名字），退回**整个文件名主干**。
 一个会话文件因此至少有一个稳定的 ID，绝不会因为「名字不规矩」而消失。

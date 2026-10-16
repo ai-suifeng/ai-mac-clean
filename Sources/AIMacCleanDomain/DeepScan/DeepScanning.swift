@@ -22,10 +22,12 @@ import AIMacCleanRules
 ///    因此「不创建 / 不修改 / 不删除」不是靠自觉，而是没有可写的东西。
 /// 2. **只读元数据**：只 `stat` 取大小与类型，不读文件内容——`.zst` / `.zstd`
 ///    只认扩展名（对深扫而言扩展名甚至不影响统计：分类来自规则声明，不来自解码）。
-/// 3. **不跟随符号链接**：链接一律记进 `unfollowedLinks`，目标不计入占用、不被遍历
-///    （PRD §8.2 的同一条纪律）。唯一的例外方向是「更保守」：目标被内置清单判为受保护时
-///    把它计进**受保护**（`~/.codex/skills → ~/.agents/skills`），目标是规则声明的根之外
-///    又不受保护时一个字节都不读。
+/// 3. **不跟随符号链接**：链接一律记进 `unfollowedLinks`，目标既不计入占用、也不被遍历
+///    （PRD §8.2、spec #22 的同一条纪律）。这条纪律**没有例外**：即使目标的真实路径落在
+///    内置受保护清单里（`~/.codex/skills → ~/.agents/skills`），也只把这条链接**判为受保护**
+///    （记进 `UnfollowedLink.protectionReason`，界面据此说「这里有一份碰不得的技能」），
+///    绝不把目标的字节算进这台工具的占用，也绝不把扫描带出规则声明的根
+///    （否则 `~/.agents/skills` 会被同时算进 `~/.codex` 与 `~/.opencode`，概览总数对不上 `du`）。
 /// 4. **权限错误按目录粒度隔离**：读不到的目录进 `unreadable`，其余照常统计，
 ///    绝不让一次扫描因为一个目录而整体失败（PRD §4.4）。
 /// 5. **访问只在规则声明的根内**：扫描的起点只有「已确认的主工具根」与「规则声明的
@@ -402,9 +404,21 @@ private struct DirectoryWalk {
         switch root.role {
         case .toolRoot:
             // 工具根本身是符号链接时不进入：跟随它等于把链接目标算成这台工具的占用
-            // （PRD §4.2 对浅扫的同一条纪律，深扫沿用）。依然报告这台工具，只是零占用。
+            // （PRD §4.2 对浅扫的同一条纪律，深扫沿用）。依然报告这台工具，只是零占用；
+            // 目标若受内置清单保护，只把链接判为受保护，不计一个字节。
             if fileType(of: rootPath) == .typeSymbolicLink {
-                recordUnfollowedLink(path: rootPath, relativePath: "", destination: linkDestination(rootPath))
+                let destination = linkDestination(rootPath)
+                recordUnfollowedLink(
+                    path: rootPath,
+                    relativePath: "",
+                    destination: destination,
+                    protectionReason: linkProtectionReason(
+                        path: rootPath,
+                        relativePath: "",
+                        resolvedPath: rootPath,
+                        destination: destination
+                    )
+                )
                 return
             }
             walk(directory: rootPath, relativePath: "", protectedReason: nil, realDirectory: realRootPath)
@@ -441,8 +455,20 @@ private struct DirectoryWalk {
             walk(directory: rootPath, relativePath: "", protectedReason: nil, realDirectory: realRootPath)
 
         case .typeSymbolicLink:
-            // 不跟随符号链接：仅展示根本身是链接时同样不展开（issue #23 硬约束）。
-            recordUnfollowedLink(path: rootPath, relativePath: "", destination: linkDestination(rootPath))
+            // 不跟随符号链接：仅展示根本身是链接时同样不展开（issue #23 硬约束、spec #22）。
+            // 目标受保护时只把这条链接判为受保护，零占用。
+            let destination = linkDestination(rootPath)
+            recordUnfollowedLink(
+                path: rootPath,
+                relativePath: "",
+                destination: destination,
+                protectionReason: linkProtectionReason(
+                    path: rootPath,
+                    relativePath: "",
+                    resolvedPath: rootPath,
+                    destination: destination
+                )
+            )
 
         default:
             // 存在的**非目录**条目：规则里会有 `~/.claude.json` 这类文件形态的根。
@@ -540,39 +566,29 @@ private struct DirectoryWalk {
 
             switch type {
             case .typeSymbolicLink:
-                // 不跟随（issue #23 硬约束）：默认既不把目标的占用算进来，也不进目标遍历。
+                // 不跟随（issue #23 硬约束、spec #22）：既不把目标的占用算进来，也不进目标遍历。
                 //
-                // 只有一个例外，而且方向是「更保守」：链接的真实目标被内置清单判为**受保护**
-                // 时，链接指向的就是用户碰不得的东西（`~/.codex/skills → ~/.agents/skills`）。
-                // 这时把它按受保护统计进来，界面上才能如实说「这里有一份受保护的技能，别动它」；
-                // 目标仍不会被归档、不会被移除。
+                // 唯一的差别在**判定**上：链接的真实目标若被内置清单判为受保护
+                // （`~/.codex/skills → ~/.agents/skills`），这条链接就判为受保护——
+                // 界面上才说得清「这里有一份技能，别动它」。但判定归判定：链接与目标一律
+                // 贡献 0 字节 / 0 文件，目标的目录一次都不被列举。
                 //
-                // 目标落在所属根**之外**且不受保护时一律跳过：跟随它等于把扫描带出规则声明的根
+                // 目标落在所属根之外时同样如此：跟随它等于把扫描带出规则声明的根
                 // （PRD §8.2「指向外部目录的链接一律拒绝处理」）。
                 // 链接目标只读一次：同一件事读两遍在 5 万文件里就是多一次系统调用
                 // （issue #29；对结果没有任何影响）。
                 let rawDestination = linkDestination(path)
-                let destination = resolvedLinkDestination(path: path, destination: rawDestination)
-                recordUnfollowedLink(path: path, relativePath: childRelative, destination: rawDestination)
-
-                // 只有「目标在内置清单里受保护」的链接才继续统计，这是安全边界：
-                // 指向所属根之外、又不受保护的目录的链接（用户自己的媒体库、别人的仓库）
-                // 一律拒绝处理（PRD §8.2）——一个字节都不读、不跟随。
-                //
-                // 链接目标是少量路径，这里仍让它自己解析符号链接（`protection(forPath:)`）：
-                // 目标可能整条路径都带链接，不值得为它再维护一套递推。
-                let protectedTarget = destination.flatMap {
-                    protection.protection(forPath: $0)?.ruleIdentifier
-                }
-
-                if let destination, let reason = protectedTarget {
-                    walk(
-                        directory: destination,
+                recordUnfollowedLink(
+                    path: path,
+                    relativePath: childRelative,
+                    destination: rawDestination,
+                    protectionReason: linkProtectionReason(
+                        path: path,
                         relativePath: childRelative,
-                        protectedReason: reason,
-                        realDirectory: protection.resolvedPath(forPath: destination)
+                        resolvedPath: realPath,
+                        destination: rawDestination
                     )
-                }
+                )
 
             case .typeDirectory:
                 // 目录这一层只认「能形容目录本身」的内置条目；文件级条目留给文件自己判。
@@ -711,14 +727,39 @@ private struct DirectoryWalk {
         return isDirectoryRule ? reason : nil
     }
 
-    private mutating func recordUnfollowedLink(path: String, relativePath: String, destination: String?) {
+    /// 一条没被跟随的链接是否受内置清单保护。
+    ///
+    /// 判定顺序：先看**真实目标**（`~/.codex/skills → ~/.agents/skills` 这类形态的语义所在，
+    /// PRD §8.2 / §14.5），目标不受保护时再看链接**自身的位置**（链接名字本身就命中内置条目，
+    /// 例如 `.codex/skills`）。两者只回答「碰不碰得」，**不换算成任何占用**：链接与目标一律
+    /// 0 字节 / 0 文件，所以这里只读目标的身份，绝不列举、绝不递归它。
+    private func linkProtectionReason(
+        path: String,
+        relativePath: String,
+        resolvedPath: String,
+        destination: String?
+    ) -> String? {
+        if let target = resolvedLinkDestination(path: path, destination: destination),
+           let reason = protection.protection(forPath: target)?.ruleIdentifier {
+            return reason
+        }
+        return protectionReason(forPath: path, relativePath: relativePath, resolvedPath: resolvedPath)
+    }
+
+    private mutating func recordUnfollowedLink(
+        path: String,
+        relativePath: String,
+        destination: String?,
+        protectionReason: String?
+    ) {
         let resolved = resolvedLinkDestination(path: path, destination: destination)
         unfollowedLinks.append(UnfollowedLink(
             path: path,
             relativePath: relativePath,
             toolID: tool.id,
             destination: destination,
-            isInsideToolRoot: resolved.map { PathText.isInside($0, root: rootPath) } ?? false
+            isInsideToolRoot: resolved.map { PathText.isInside($0, root: rootPath) } ?? false,
+            protectionReason: protectionReason
         ))
     }
 

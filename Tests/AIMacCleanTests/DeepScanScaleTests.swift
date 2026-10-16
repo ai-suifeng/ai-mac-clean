@@ -317,10 +317,12 @@ final class DeepScanScaleTests: XCTestCase {
         try fixture.makeSymbolicLink(".codex/sessions/link-out", to: movies.deletingLastPathComponent().path)
 
         let recorder = RecordingDiscoveryFileSystem()
-        _ = DeepScanner(fileSystem: recorder).scan(
-            tools: [tool],
-            rules: [rule],
-            homeDirectory: fixture.rootPath
+        let report = try XCTUnwrap(
+            DeepScanner(fileSystem: recorder).scan(
+                tools: [tool],
+                rules: [rule],
+                homeDirectory: fixture.rootPath
+            ).toolReports.first
         )
 
         XCTAssertEqual(recorder.writeAttempts, [], "深扫全程零写入：\(recorder.writeSummary)")
@@ -330,13 +332,23 @@ final class DeepScanScaleTests: XCTestCase {
             "只读元数据：不读文件头"
         )
 
-        // 记录到的访问里，工具根之外的只允许「受保护链接的真实目标」一处。
+        // 访问范围**只在工具根内**：连受保护链接的真实目标也不碰（spec #22）。
+        // 目标只被用来判定「这条链接碰不碰得」，判定不列举它、不递归它、不算它的字节。
         let toolRoot = tool.toolRootPath
         let outside = recorder.touchedPaths.filter { !$0.hasPrefix(toolRoot + "/") && $0 != toolRoot }
-        XCTAssertFalse(outside.isEmpty, "对照组：这棵树里确实有工具根之外的受保护目标被读过")
-        XCTAssertTrue(
-            outside.allSatisfy { $0 == sharedSkills.deletingLastPathComponent().path || $0 == sharedSkills.path },
-            "工具根之外只允许碰受保护链接的真实目标；实际碰到：\(outside)"
+        XCTAssertEqual(
+            outside,
+            [],
+            "访问范围只在已确认工具的工具根内：受保护链接的真实目标一次都不许碰。实际碰到：\(outside)"
+        )
+        XCTAssertEqual(
+            report.unfollowedLinks.first { $0.relativePath == "skills" }?.protectionReason,
+            "codex-cli/skills",
+            "链接仍被**判定**为受保护（PRD A3/A8），只是零占用"
+        )
+        XCTAssertNil(
+            report.category(.protected),
+            "受保护链接的 300 字节不进占用（spec #22：绝不把链接目标算进工具占用）"
         )
 
         // 不得列举主目录（issue #19 的纪律在深扫里继续成立），也不得碰外部媒体库。
@@ -355,19 +367,13 @@ final class DeepScanScaleTests: XCTestCase {
             if case let .stat(path) = access { return path }
             return nil
         }
-        // 受保护链接的目标目录本身不会被 stat：深扫是直接进入它（列举），
-        // 逐条读取的是它里面的条目——这正是「不跟随链接、只读目标内容」的形态。
-        let expectedStats = Set(
-            [toolRoot]
-                + fixture.entryPaths(underToolRootRelative: shape.toolRootName)
-                + [sharedSkills.path]
-        )
+        let expectedStats = Set([toolRoot] + fixture.entryPaths(underToolRootRelative: shape.toolRootName))
         XCTAssertEqual(
             stats.count,
             expectedStats.count,
             "每个条目恰好读一次元数据（重复读盘是 scale 题里的浪费）：\(recorder.summary)"
         )
-        XCTAssertEqual(Set(stats), expectedStats, "读元数据的范围必须正好是树上的条目（含受保护链接目标）")
+        XCTAssertEqual(Set(stats), expectedStats, "读元数据的范围必须正好是工具根内的条目")
     }
 
     // MARK: - 规模下的符号链接与权限错误
@@ -395,7 +401,8 @@ final class DeepScanScaleTests: XCTestCase {
             fixture.unlock(lockedB)
         }
 
-        // 一条指向受保护目标的链接（目标 300 字节算进受保护）与一条指向外部媒体库的链接。
+        // 一条指向受保护目标的链接（判为受保护，但目标 300 字节**不进占用**，spec #22）
+        // 与一条指向外部媒体库的链接。
         let sharedSkills = try fixture.write("shared-apps/skills/SKILL.md", bytes: 300)
         try fixture.makeSymbolicLink(".codex/skills", to: sharedSkills.deletingLastPathComponent().path)
         let movies = try fixture.write("movies/巨大的视频.bin", bytes: 100_000)

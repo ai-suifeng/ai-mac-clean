@@ -63,9 +63,14 @@ final class OccupancyBreakdownTests: XCTestCase {
     func test工具的四类分列齐全且顺序固定() {
         let rows = claudeLike.categoryLines
 
-        XCTAssertEqual(rows.map(\.displayName), ["可归档会话", "缓存与日志", "受保护", "不确定"])
-        XCTAssertEqual(rows.map(\.handling), ["支持归档", "只展示大小，不动", "永不触碰，仅展示", "锁定，仅展示大小"])
+        // 领域层只给结构（类别 + 占用 + 本阶段能否归档），**不携带文案**：
+        // 类别名与处理方式在界面层的 `CategoryCopy`（本地化目录），概览与明细两页同源。
         XCTAssertEqual(rows.map(\.categoryID), ["archivableSession", "cacheAndLog", "protected", "uncertain"])
+        XCTAssertEqual(
+            rows.map(\.category),
+            [.archivableSession, .cacheAndLog, .protected, .uncertain],
+            "顺序是 PRD §5.1 的表格顺序"
+        )
         // 没有数据的类别给 0，而不是从列表里消失。
         XCTAssertEqual(rows.map(\.occupancy.bytes), [15, 9_985, 0, 0])
         // M2 四类都不可归档（归档是 M3）。
@@ -76,7 +81,7 @@ final class OccupancyBreakdownTests: XCTestCase {
         let report = DeepScanReport(toolReports: [claudeLike, halfArchivable, nothingArchivable])
         let rows = report.categoryLines
 
-        XCTAssertEqual(rows.map(\.displayName), ["可归档会话", "缓存与日志", "受保护", "不确定"])
+        XCTAssertEqual(rows.map(\.categoryID), ["archivableSession", "cacheAndLog", "protected", "uncertain"])
         // 手算：可归档 15 + 1_000_000 + 0；缓存 9_985 + 1_000_000；受保护 5_000。
         XCTAssertEqual(rows.map(\.occupancy.bytes), [1_000_015, 1_009_985, 5_000, 0])
         XCTAssertEqual(Occupancy.sum(rows.map(\.occupancy)), report.totalOccupancy, "四类之和必须等于总占用")

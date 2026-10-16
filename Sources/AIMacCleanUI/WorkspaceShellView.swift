@@ -11,8 +11,15 @@ public struct WorkspaceShellView: View {
     private let overviewPageModel: OverviewPageModel
 
     /// 用生产接线（真实规则目录与本机确认存储）构造外壳。
-    public init() {
-        self.init(discoveryPageModel: .standard(), overviewPageModel: .standard())
+    ///
+    /// - Parameter language: 已实现页面的界面语言；`nil` 走 `L10n` 的基准语言（简体中文）。
+    ///   概览页的四类分列与全部文案据此取本地化目录（`OverviewPageModel.standard`）；
+    ///   发现与确认页当前还没有语言参数。
+    public init(language: AppLanguage? = nil) {
+        self.init(
+            discoveryPageModel: .standard(),
+            overviewPageModel: .standard(language: language)
+        )
     }
 
     /// 注入一个发现与确认页的视图模型（测试与预览用）；概览页用生产接线。
