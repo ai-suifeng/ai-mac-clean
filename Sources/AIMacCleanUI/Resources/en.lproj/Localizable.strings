@@ -76,3 +76,8 @@
 "classification.category.cacheAndLog" = "Cache & logs";
 "classification.category.protected" = "Protected";
 "classification.category.uncertain" = "Uncertain";
+"classification.handling.archivableSession" = "Archiving supported";
+"classification.handling.archivableSession.stage" = "Archiving lands in a later milestone; this version does not move or delete any file.";
+"classification.handling.cacheAndLog" = "Shown only, never touched";
+"classification.handling.protected" = "Never touched, shown only";
+"classification.handling.uncertain" = "Locked, size shown only";

@@ -72,6 +72,11 @@ public enum ClassificationDetailPresenter {
         ClassificationCategoryRow(
             category: occupancy.category,
             nameText: nameText(for: occupancy.category, language: language),
+            handlingText: handlingText(for: occupancy.category, language: language),
+            noteText: occupancy.category == .archivableSession
+                ? L10n.text(.classificationHandlingArchivableSessionStage, language: language)
+                : nil,
+            isArchivableNow: occupancy.category.isArchivableNow,
             sizeText: occupancy.occupancy.sizeText,
             fileCountText: fileCountText(occupancy.occupancy.fileCount, language: language),
             shareText: percentText(share(of: occupancy.occupancy.bytes, totalBytes: totalBytes))
@@ -83,6 +88,14 @@ public enum ClassificationDetailPresenter {
     /// 一个类别的界面名（PRD §5.1 的「类别」一列）。
     public static func nameText(for category: DataCategory, language: AppLanguage? = nil) -> String {
         L10n.text(nameKey(for: category), language: language)
+    }
+
+    /// 一个类别的处理方式（PRD §5.1 的「处理」一列，逐字）。
+    ///
+    /// 这三句是**承诺**：缓存与日志「只展示大小，不动」、受保护「永不触碰」、
+    /// 不确定「锁定」。界面不得改写、不得省略（诚实展示）。
+    public static func handlingText(for category: DataCategory, language: AppLanguage? = nil) -> String {
+        L10n.text(handlingKey(for: category), language: language)
     }
 
     /// 「1234 个文件」。
@@ -121,6 +134,15 @@ public enum ClassificationDetailPresenter {
         case .cacheAndLog: return .classificationCategoryCacheAndLog
         case .protected: return .classificationCategoryProtected
         case .uncertain: return .classificationCategoryUncertain
+        }
+    }
+
+    private static func handlingKey(for category: DataCategory) -> L10n.Key {
+        switch category {
+        case .archivableSession: return .classificationHandlingArchivableSession
+        case .cacheAndLog: return .classificationHandlingCacheAndLog
+        case .protected: return .classificationHandlingProtected
+        case .uncertain: return .classificationHandlingUncertain
         }
     }
 }
@@ -173,6 +195,17 @@ public struct ClassificationCategoryRow: Equatable, Identifiable {
     /// 类别名（PRD §5.1「类别」一列，L10n）。
     public let nameText: String
 
+    /// 处理方式（PRD §5.1「处理」一列，L10n，逐字）。
+    ///
+    /// 不可归档的三类靠它把承诺说清楚：只展示 / 永不触碰 / 锁定。
+    public let handlingText: String
+
+    /// 处理方式之后还要补的一句（目前只有可归档会话需要：归档能力是 M3）。
+    public let noteText: String?
+
+    /// 本阶段（M2）这一类能不能被归档。四类一律为假——归档是 M3。
+    public let isArchivableNow: Bool
+
     /// 本类占用（`ByteSizeFormatter`）。
     public let sizeText: String
 
@@ -187,12 +220,18 @@ public struct ClassificationCategoryRow: Equatable, Identifiable {
     public init(
         category: DataCategory,
         nameText: String,
+        handlingText: String,
+        noteText: String? = nil,
+        isArchivableNow: Bool,
         sizeText: String,
         fileCountText: String,
         shareText: String
     ) {
         self.category = category
         self.nameText = nameText
+        self.handlingText = handlingText
+        self.noteText = noteText
+        self.isArchivableNow = isArchivableNow
         self.sizeText = sizeText
         self.fileCountText = fileCountText
         self.shareText = shareText

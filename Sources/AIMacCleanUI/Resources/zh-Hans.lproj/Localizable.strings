@@ -79,3 +79,8 @@
 "classification.category.cacheAndLog" = "缓存与日志";
 "classification.category.protected" = "受保护";
 "classification.category.uncertain" = "不确定";
+"classification.handling.archivableSession" = "支持归档";
+"classification.handling.archivableSession.stage" = "归档能力在后续里程碑落地；当前版本不会移动或删除任何文件。";
+"classification.handling.cacheAndLog" = "只展示大小，不动";
+"classification.handling.protected" = "永不触碰，仅展示";
+"classification.handling.uncertain" = "锁定，仅展示大小";

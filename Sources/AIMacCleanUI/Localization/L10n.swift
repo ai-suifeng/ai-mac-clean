@@ -110,6 +110,11 @@ public enum L10n {
         case classificationCategoryCacheAndLog = "classification.category.cacheAndLog"
         case classificationCategoryProtected = "classification.category.protected"
         case classificationCategoryUncertain = "classification.category.uncertain"
+        case classificationHandlingArchivableSession = "classification.handling.archivableSession"
+        case classificationHandlingArchivableSessionStage = "classification.handling.archivableSession.stage"
+        case classificationHandlingCacheAndLog = "classification.handling.cacheAndLog"
+        case classificationHandlingProtected = "classification.handling.protected"
+        case classificationHandlingUncertain = "classification.handling.uncertain"
     }
 
     /// 按当前系统语言取文案，取不到时落到中文。

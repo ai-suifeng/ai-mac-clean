@@ -1,7 +1,6 @@
 import Foundation
 
 import AIMacCleanDomain
-import AIMacCleanRules
 
 /// 分类明细页用例的夹具（issue #27）。
 ///
