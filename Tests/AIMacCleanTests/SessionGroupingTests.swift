@@ -539,6 +539,38 @@ final class SessionGroupingTests: XCTestCase {
         XCTAssertEqual(tool.archivableOccupancy, Occupancy())
     }
 
+    /// 目录剪枝：只走「声明形状的字面前缀」所在的子树。`~/.claude/plugins`（247M）与
+    /// `~/.codex/.tmp`（879M / 24,849 个文件）本来就不可能是会话文件，连列举都不该发生；
+    /// 同时真正的会话一个都不能少。
+    func test目录剪枝只走声明形状所在的子树() throws {
+        let fixture = try DeepScanFixture(named: "session-pruning")
+        defer { fixture.remove() }
+
+        let sessionID = "13131313-1313-1313-1313-131313131313"
+        let codexID = "0199f45a-e697-7243-a7fb-a441b54cb42e"
+        try fixture.write(".claude/plugins/市场/很多文件.jsonl", bytes: 100)
+        try fixture.write(".claude/projects/-Users-x-a/\(sessionID).jsonl", bytes: 10)
+        try fixture.write(".codex/.tmp/stale.jsonl", bytes: 200)
+        try fixture.write(
+            ".codex/sessions/2026/10/14/rollout-2026-10-14T09-08-28-\(codexID).jsonl.zst",
+            bytes: 20
+        )
+
+        let recorder = RecordingDiscoveryFileSystem()
+        let report = SessionGrouper(fileSystem: recorder).group(
+            tools: [claudeTool(fixture), codexTool(fixture)],
+            rules: try admittedBundledRules(),
+            homeDirectory: fixture.rootPath
+        )
+
+        XCTAssertEqual(report.sessions.count, 2, "剪枝不能把真正的会话剪掉")
+        XCTAssertEqual(
+            recorder.listedDirectories.filter { $0.contains("/plugins") || $0.contains("/.tmp") },
+            [],
+            "实测大头（plugins / .tmp）连列举都不该发生：\n\(recorder.summary)"
+        )
+    }
+
     // MARK: - 夹具与断言助手
 
     private func group(

@@ -13,7 +13,8 @@ import AIMacCleanRules
 /// （`DeepScanRuleCatalog`）负责，避免同一件事出现两套答案。
 struct SessionShapeCatalog {
 
-    /// 会话文件形状（相对工具根）。声明顺序保留，用于稳定排序。
+    /// 会话文件形状（相对工具根）。命中哪条按**具体性**决定（见 `bestSessionPattern`），
+    /// 与规则文件里的书写顺序无关。
     let sessionPatterns: [PathPattern]
 
     /// 级联声明（`siblingTranscripts` / `sessionKeyedDirectory` / `sessionKeyedFile`）。
@@ -32,8 +33,15 @@ struct SessionShapeCatalog {
 
         // 剪枝范围必须覆盖「可能被判为可归档」的全部形状：会话文件、级联声明，
         // 以及分类表里声明为可归档的条目（散落文件也要如实呈现，不能因为剪枝漏掉）。
+        //
+        // `siblingTranscripts` 是唯一不能按工具根算字面前缀的级联：它的基准是
+        // **主转录所在目录**（`agent-<uuid>.jsonl` 本身就是一整段，字面前缀是空的）。
+        // 把它算进来只会得出「不剪枝」，而它本来就被会话文件那条形状覆盖着——
+        // 同级转录必然与某份主转录同目录，主转录又在会话形状的字面前缀之下。
         var patterns = sessionPatterns
-        patterns.append(contentsOf: cascades.map(\.pattern))
+        patterns.append(contentsOf: cascades
+            .filter { $0.kind != .siblingTranscripts }
+            .map(\.pattern))
         patterns.append(contentsOf: rule.classification
             .filter { $0.category == .archivableSession }
             .map(\.pattern))
